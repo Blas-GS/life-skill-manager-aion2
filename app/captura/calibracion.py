@@ -98,11 +98,6 @@ def configuracion_para(ancho: int, alto: int, ruta=None) -> dict:
     }
 
 
-def region_para(ancho: int, alto: int, ruta=None) -> tuple[int, int, int, int]:
-    """Region (x, y, w, h) of the list; full screen if there is no calibration."""
-    return tuple(configuracion_para(ancho, alto, ruta)["lista"])
-
-
 def guardar_region(ancho, alto, region, columnas=None, escala=None, ruta=None) -> dict:
     """Saves the region the user marks in the UI for that resolution."""
     entrada = {

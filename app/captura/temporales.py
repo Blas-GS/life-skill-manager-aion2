@@ -232,23 +232,8 @@ class Temporales:
 _por_defecto = Temporales()
 
 
-def configurar(dir_tmp) -> Temporales:
-    """Changes the default temporary folder (useful in tests)."""
-    global _por_defecto
-    _por_defecto = Temporales(dir_tmp)
-    return _por_defecto
-
-
-def instancia() -> Temporales:
-    return _por_defecto
-
-
 def registrar_temporal(ruta, lecturas_ids, tipo=None):
     return _por_defecto.registrar_temporal(ruta, lecturas_ids, tipo)
-
-
-def esta_registrado(ruta) -> bool:
-    return _por_defecto.esta_registrado(ruta)
 
 
 def limpiar_verificados(repo) -> dict:
@@ -257,10 +242,6 @@ def limpiar_verificados(repo) -> dict:
 
 def registrar_recorte(ruta, fila=None):
     return _por_defecto.registrar_recorte(ruta, fila)
-
-
-def recortes_pendientes() -> dict:
-    return _por_defecto.recortes_pendientes()
 
 
 def marcar_revisado(ruta) -> bool:

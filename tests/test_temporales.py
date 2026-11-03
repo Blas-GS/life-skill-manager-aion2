@@ -151,16 +151,12 @@ def test_aplicar_tope_por_debajo(tmp):
     assert not res["excedido"] and res["tamano_mb"] < 1
 
 
-def test_funciones_de_modulo_con_configurar(tmp_path):
-    original = temporales.instancia()
-    try:
-        temporales.configurar(tmp_path / "tmp")
-        a = _archivo(tmp_path / "a.png")
-        temporales.registrar_temporal(a, ["1"])
-        assert temporales.esta_registrado(a)
-        temporales.limpiar_verificados(RepoFalso(respuesta=False))
-        assert a.exists()
-        temporales.limpiar_verificados(RepoFalso(respuesta=True))
-        assert not a.exists()
-    finally:
-        temporales._por_defecto = original
+def test_funciones_de_modulo(tmp_path, monkeypatch):
+    monkeypatch.setattr(temporales, "_por_defecto", temporales.Temporales(tmp_path / "tmp"))
+    a = _archivo(tmp_path / "a.png")
+    temporales.registrar_temporal(a, ["1"])
+    assert temporales._por_defecto.esta_registrado(a)
+    temporales.limpiar_verificados(RepoFalso(respuesta=False))
+    assert a.exists()
+    temporales.limpiar_verificados(RepoFalso(respuesta=True))
+    assert not a.exists()

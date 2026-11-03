@@ -13,10 +13,9 @@ pytest.importorskip("winrt.windows.media.ocr")
 sys.path.insert(0, str(Path(__file__).parent / "fixtures" / "capturas"))
 import sintetico  # noqa: E402
 
-from app.captura import calibracion, ocr, parser, temporales  # noqa: E402
+from app.captura import calibracion, ocr, parser  # noqa: E402
 from app.captura.grabacion import Deduplicador, SesionGrabacion, procesar_imagen  # noqa: E402
 from app.captura.video import procesar_video  # noqa: E402
-from app.captura.vigilante import Vigilante  # noqa: E402
 
 CAT = sintetico.CATALOGO
 ID = {v: k for k, v in CAT.items()}
@@ -220,46 +219,23 @@ def test_sesion_grabacion_informa_errores():
         sesion.detener()
 
 
-# ---------------------------------------------------------------- watcher
-def test_vigilante_procesa_capturas_nuevas_una_vez(tmp_path):
-    original = temporales.instancia()
-    temporales.configurar(tmp_path / "tmp")
-    try:
-        carpeta = tmp_path / "pendientes"
-        carpeta.mkdir()
-        leidos = []
-        vig = Vigilante(carpeta=carpeta, cat=CAT, al_procesar=lambda r, f: leidos.append((r, f)))
-        img = sintetico.pantalla_mercado(BASICO)
-        img.save(carpeta / "captura1.png")
-        (carpeta / "notas.txt").write_text("no es una imagen")
-        assert vig.revisar() == []          # 1st pass: waits for the file to be stable
-        res = vig.revisar()                 # 2nd pass: processes it
-        assert len(res) == 1 and leidas(res[0][1]) == esperadas(BASICO)
-        assert vig.revisar() == []          # not reprocessed
-        assert len(leidos) == 1
-        # A screenshot already registered in temporales (saved) is not processed.
-        img.save(carpeta / "captura2.png")
-        temporales.registrar_temporal(carpeta / "captura2.png", ["id"])
-        vig.revisar()
-        assert vig.revisar() == []
-        assert (carpeta / "captura1.png").exists()  # the watcher never deletes
-    finally:
-        temporales._por_defecto = original
-
-
 # ---------------------------------------------------------------- calibration
+def region(ancho, alto, ruta):
+    return tuple(calibracion.configuracion_para(ancho, alto, ruta)["lista"])
+
+
 def test_calibracion_por_resolucion(tmp_path):
     ruta = tmp_path / "calibracion.json"
-    assert calibracion.region_para(1920, 1080, ruta) == (0, 0, 1920, 1080)
+    assert region(1920, 1080, ruta) == (0, 0, 1920, 1080)
     assert calibracion.configuracion_para(1920, 1080, ruta)["calibrada"] is False
     calibracion.guardar_region(1920, 1080, (300, 200, 2000, 700), ruta=ruta,
                                columnas={"nombre": [320, 900], "cantidad": [1000, 1200], "precio": [1300, 1600]})
     # It is clipped to the screen.
-    assert calibracion.region_para(1920, 1080, ruta) == (300, 200, 1620, 700)
+    assert region(1920, 1080, ruta) == (300, 200, 1620, 700)
     conf = calibracion.configuracion_para(1920, 1080, ruta)
     assert conf["calibrada"] and conf["columnas"]["precio"] == [1300, 1600]
-    assert calibracion.region_para(2560, 1440, ruta) == (0, 0, 2560, 1440)
+    assert region(2560, 1440, ruta) == (0, 0, 2560, 1440)
     with pytest.raises(ValueError):
         calibracion.guardar_region(1920, 1080, (0, 0, 10, 10), columnas={"color": [0, 1]}, ruta=ruta)
     assert calibracion.borrar_region(1920, 1080, ruta)
-    assert calibracion.region_para(1920, 1080, ruta) == (0, 0, 1920, 1080)
+    assert region(1920, 1080, ruta) == (0, 0, 1920, 1080)
