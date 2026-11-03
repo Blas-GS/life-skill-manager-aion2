@@ -34,17 +34,11 @@ const claseSigno = v => !vale(v) ? '' : v >= 0 ? 'gain' : 'loss';
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const debounce = (fn, ms = 250) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
-function hace(h) {
-  if (h == null) return t('sin datos');
+function hace(h, largo = false) {
+  if (h == null) return t(largo ? 'sin fecha' : 'sin datos');
   if (h < 1) return t('hace {n} min', { n: Math.max(1, Math.round(h * 60)) });
   if (h < 48) return t('hace {n} h', { n: Math.round(h) });
-  return t('hace {n} d', { n: Math.round(h / 24) });
-}
-function haceLargo(h) {
-  if (h == null) return t('sin fecha');
-  if (h < 1) return t('hace {n} min', { n: Math.max(1, Math.round(h * 60)) });
-  if (h < 48) return t('hace {n} h', { n: Math.round(h) });
-  return t('hace {n} días', { n: Math.round(h / 24) });
+  return t(largo ? 'hace {n} días' : 'hace {n} d', { n: Math.round(h / 24) });
 }
 function fecha(isoTxt) {
   if (!isoTxt) return '—';
@@ -233,8 +227,7 @@ async function cargarEstado() {
   el.className = 'estado-bd ' + (!s.backend ? 'mal' : s.en_cola ? 'cola' : 'ok');
   el.title = t('Base de datos: {bd}', { bd }) + (s.en_cola ? t(' · {n} en cola', { n: s.en_cola }) : '');
   const c = s.componentes || {}, avisos = [];
-  for (const k of ['catalogo', 'repo', 'motor']) if (c[k] && !c[k].ok) avisos.push(esc(tApi(c[k].mensaje || k)));
-  if (s.catalogo && s.catalogo.aviso) avisos.push(esc(tApi(s.catalogo.aviso)));
+  for (const k of ['catalogo', 'repo']) if (c[k] && !c[k].ok) avisos.push(esc(tApi(c[k].mensaje || k)));
   $('#avisos-globales').innerHTML = avisos.map(a => avisoHTML(a, 'error')).join('');
   $('#avisos-globales').hidden = !avisos.length;
   if (s.catalogo) {
@@ -363,7 +356,7 @@ function pintarLectura(f, r) {
   let titulo, det;
   if (!f && !(r && r.n_precios)) { titulo = t('Aún no hay precios'); det = t('Lee el mercado para empezar a calcular'); }
   else if (h == null) { titulo = t('Precios sin fecha'); det = t('Haz una lectura antes de comprar'); }
-  else { titulo = t('Precios de {h}', { h: haceLargo(h) }); det = fresca ? t('Recién leídos: puedes comprar con confianza') : t('Haz una lectura antes de comprar'); }
+  else { titulo = t('Precios de {h}', { h: hace(h, true) }); det = fresca ? t('Recién leídos: puedes comprar con confianza') : t('Haz una lectura antes de comprar'); }
   $('#panel-lectura').innerHTML = `<div class="lectura ${fresca ? 'fresca' : ''}">${iconoUI('reloj')}<div class="lectura-texto"><div class="lectura-titulo">${titulo}</div><div class="lectura-det">${det}</div></div><button class="btn" data-ir="captura">${t('Leer mercado')}</button></div>`;
 }
 
@@ -504,7 +497,7 @@ function avisosHTML(lista) {
   const viejos = [], otros = [];
   (lista || []).forEach(a => { const m = /^Precio de (.+) antiguo \((\d+) h\)/.exec(a || ''); if (m) viejos.push(m); else otros.push(a); });
   let html = otros.map(a => `<div class="aviso"><span class="punto ambar"></span><span>${esc(avisoTxt(a))}</span></div>`).join('');
-  if (viejos.length) html += `<div class="aviso"><span class="punto rojo"></span><span><b>${t(viejos.length > 1 ? '{n} precios antiguos' : '{n} precio antiguo', { n: viejos.length })}</b> (${esc(haceLargo(Math.max(...viejos.map(m => +m[2]))))}): ${viejos.map(m => esc(nomTxt(m[1]))).join(', ')}. ${t('Haz una lectura del mercado.')}</span></div>`;
+  if (viejos.length) html += `<div class="aviso"><span class="punto rojo"></span><span><b>${t(viejos.length > 1 ? '{n} precios antiguos' : '{n} precio antiguo', { n: viejos.length })}</b> (${esc(hace(Math.max(...viejos.map(m => +m[2])), true))}): ${viejos.map(m => esc(nomTxt(m[1]))).join(', ')}. ${t('Haz una lectura del mercado.')}</span></div>`;
   return html;
 }
 function cifra(et, v, clase = '') { return `<div class="cifra"><div class="cifra-et">${et}</div><div class="cifra-v ${clase}">${v}</div></div>`; }
@@ -636,7 +629,6 @@ async function cargarObjetoMercado(oid) {
       ${cifra(t('Volumen / día'), d.volumen_dia != null ? num1(d.volumen_dia) : '—')}${cifra(t('Compra por debajo de'), kin(c.comprar_por_debajo_de))}
       ${cifra(t('Precio objetivo'), kin(v.precio_recomendado), 'gain')}</div>
     ${v.aviso ? `<div style="margin-top:12px">${avisoHTML(esc(avisoTxt(v.aviso)))}</div>` : ''}${c.aviso && c.estado === 'oportunidad' ? `<div style="margin-top:12px">${avisoHTML(esc(avisoTxt(c.aviso)), 'ok')}</div>` : ''}
-    ${d.aviso_objetivo ? `<div style="margin-top:12px">${avisoHTML(esc(avisoTxt(d.aviso_objetivo)), 'error')}</div>` : ''}
     <div class="fila" style="margin-top:16px"><div class="auto"><label for="m-dias">${t('Histórico')}</label>
       <select id="m-dias">${[7, 30, 90, 365].map(n => `<option value="${n}" ${n == d.dias ? 'selected' : ''}>${t('{n} días', { n })}</option>`).join('')}</select></div>
       <div class="auto"><button class="btn btn-s" id="m-a-manual">${iconoUI('etiqueta', 18)} ${t('Apuntar precio')}</button></div>
@@ -952,7 +944,6 @@ async function verReceta(id, cambiarPestana = true, intentos) {
   const det = `${esc(nombreProf(r.profesion))} · ${t('nivel {n}', { n: r.nivel })} · ${r.faccion === 'ambas' ? t('ambas facciones') : esc(nombreFaccion(r.faccion))} · ${t('produce {n}', { n: r.cantidad || 1 })}${r.combo_pct ? ` · ${t('combo {p}', { p: r.combo_pct + ' %' })}${combo}` : ''}`;
   cont.innerHTML = `<div class="pila-grande">
     ${objHTML(r.producto, `<span class="ic-nombre" style="font-size:20px">${esc(nom(r.producto, r.nombre))}</span>`, det, 'ic-l')}
-    ${d.aviso ? avisoHTML(esc(avisoTxt(d.aviso)), 'error') : ''}
     ${a ? `<div class="fila"><div class="auto"><label for="rd-n">${t('Intentos')}</label><input id="rd-n" type="number" min="1" value="${a.intentos}" style="width:110px"></div>
       <div class="auto"><button class="btn btn-s" id="rd-re">${t('Recalcular')}</button></div>
       <div class="auto"><button class="btn btn-p" id="rd-lista">${iconoUI('carrito', 18)} ${t('Lista de la compra')}</button></div></div>
