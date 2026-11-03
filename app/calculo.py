@@ -1,14 +1,14 @@
-"""Motor de rentabilidad de artesanía (AION 2).
+"""Crafting profitability engine (AION 2).
 
-Interfaz pública (ver docs/contratos.md, sección 3):
+Public interface (see docs/contratos.md, section 3):
     coste_adquisicion(objeto_id, cat, precios, ...) -> (coste, origen, receta_id | None)
     analizar_receta(receta, cat, precios, ajustes, nivel, inventario=None, intentos=1, ...) -> dict
     mejores_oportunidades(cat, precios, ajustes, niveles, faccion, inventario=None, filtros=None, ...) -> list[dict]
 
-`cat` puede ser el dict crudo de data/catalogo.json o un objeto Catalogo (app/catalogo.py).
-`precios` es {objeto_id: InfoPrecio}; InfoPrecio puede ser un dict o una Lectura
-(campos precio_min, ofertas, fecha, cantidad_total, num_anuncios; opcionales precio_npc, volumen_dia).
-Todas las probabilidades se devuelven como fracción (0–1); las curvas del catálogo están en %.
+`cat` can be the raw dict from data/catalogo.json or a Catalogo object (app/catalogo.py).
+`precios` is {objeto_id: InfoPrecio}; InfoPrecio can be a dict or a Lectura
+(fields precio_min, ofertas, fecha, cantidad_total, num_anuncios; optional precio_npc, volumen_dia).
+All probabilities are returned as fractions (0–1); the catalog curves are in %.
 """
 from __future__ import annotations
 
@@ -20,18 +20,18 @@ from app.precio_objetivo import a_utc, campo, fmt
 INF = math.inf
 
 AJUSTES_POR_DEFECTO = {
-    "comision_registro": 0.02,       # se paga al listar (sobre el precio de listado)
-    "impuesto_venta": 0.10,          # se paga al vender
-    "rebaja_listado": 1,             # Kinah por debajo del más barato
+    "comision_registro": 0.02,       # paid when listing (on the listing price)
+    "impuesto_venta": 0.10,          # paid when selling
+    "rebaja_listado": 1,             # Kinah below the cheapest listing
     "combo_fallido": "pierde_todo",  # "pierde_todo" | "queda_base"
-    "valorar_inventario": "mercado", # "mercado" (coste de oportunidad) | "cero"
+    "valorar_inventario": "mercado", # "mercado" (opportunity cost) | "cero"
     "horas_precio_antiguo": 24,
     "max_anuncios": 10,
-    "unidades_por_anuncio": 1,       # unidades que caben en un anuncio (por confirmar en el juego)
-    "anuncios_saturado": 50,         # nº de anuncios del producto a partir del cual se avisa
-    "dias_saturado": 7,              # saturado si en oferta > N días de ventas (si hay volumen_dia)
-    "tope_intentos": 100,            # intentos recomendados como máximo en el panel
-    "nivel_por_defecto": 1,          # nivel si el perfil no tiene esa profesión
+    "unidades_por_anuncio": 1,       # units that fit in one listing (to be confirmed in game)
+    "anuncios_saturado": 50,         # number of product listings from which a warning is shown
+    "dias_saturado": 7,              # saturated if on offer > N days of sales (when volumen_dia exists)
+    "tope_intentos": 100,            # maximum recommended attempts in the dashboard
+    "nivel_por_defecto": 1,          # level used when the profile lacks that profession
 }
 
 ORDEN_ORIGEN = {"inventario": 0, "mercado": 1, "npc": 2, "fabricar": 3}
@@ -45,10 +45,10 @@ def ajustes_completos(ajustes=None) -> dict:
     return resultado
 
 
-# --- catálogo ----------------------------------------------------------------
+# --- catalog -----------------------------------------------------------------
 
 class _Cat:
-    """Adaptador: acepta el dict de catalogo.json o un objeto Catalogo."""
+    """Adapter: accepts the catalogo.json dict or a Catalogo object."""
 
     def __init__(self, cat):
         self._cat = cat
@@ -106,8 +106,8 @@ class _Cat:
         return int(oid) in self._ingredientes
 
     def valor_curva(self, curva, indice):
-        """Probabilidad (0–1) de la curva en el índice, saturando al último valor.
-        Devuelve (prob, conocida)."""
+        """Probability (0–1) of the curve at the index, clamped to the last value.
+        Returns (prob, known)."""
         if curva is None:
             return 1.0, True
         valores = curva if isinstance(curva, (list, tuple)) else self.curvas.get(curva)
@@ -116,10 +116,10 @@ class _Cat:
         return float(valores[min(max(indice, 0), len(valores) - 1)]) / 100.0, True
 
 
-# --- probabilidades ----------------------------------------------------------
+# --- probabilities -----------------------------------------------------------
 
 def probabilidades(receta, nivel, cat, ajustes=None) -> dict:
-    """P(éxito), combos y unidades esperadas por intento de cada producto."""
+    """P(success), combos and expected units per attempt of each product."""
     cat = cat if isinstance(cat, _Cat) else _Cat(cat)
     aj = ajustes_completos(ajustes)
     diferencia = int(nivel) - int(receta.get("nivel") or 1)
@@ -159,7 +159,7 @@ def probabilidades(receta, nivel, cat, ajustes=None) -> dict:
     }
 
 
-# --- contexto de cálculo (memo de costes) ------------------------------------
+# --- calculation context (cost memo) -----------------------------------------
 
 class _Contexto:
     def __init__(self, cat, precios, ajustes, niveles, faccion=None, precios_npc=None, ahora=None):
@@ -196,7 +196,7 @@ class _Contexto:
         return self.nivel(receta["profesion"]) >= int(receta.get("nivel") or 1)
 
     def coste_fabricar(self, oid, pila=frozenset()):
-        """Mejor coste unitario fabricando `oid`: (coste|None, receta_id|None, completo)."""
+        """Best unit cost of crafting `oid`: (coste|None, receta_id|None, completo)."""
         mejor, mejor_id, completo = None, None, True
         pila = pila | {int(oid)}
         for r in self.cat.recetas_que_producen(oid):
@@ -222,8 +222,8 @@ class _Contexto:
         return mejor, mejor_id, completo
 
     def coste(self, oid, pila=frozenset()):
-        """(coste, origen, receta_id, completo). `completo`=False si se cortó un ciclo
-        (entonces no se memoiza, porque el valor depende de la rama)."""
+        """(coste, origen, receta_id, completo). `completo`=False if a cycle was cut
+        (then it is not memoized, because the value depends on the branch)."""
         oid = int(oid)
         if oid in self._memo:
             return self._memo[oid] + (True,)
@@ -253,10 +253,10 @@ class _Contexto:
 
 def coste_adquisicion(objeto_id, cat, precios, ajustes=None, niveles=None, faccion=None,
                       inventario=None, precios_npc=None, _ctx=None):
-    """Coste unitario más barato de conseguir un objeto: mercado, NPC o fabricarlo.
+    """Cheapest unit cost of getting an item: market, NPC or crafting it.
 
-    Con inventario y valorar_inventario="cero" las unidades propias cuestan 0; con "mercado"
-    se valoran a su precio de mercado (coste de oportunidad). Devuelve (coste, origen, receta_id).
+    With inventory and valorar_inventario="cero" owned units cost 0; with "mercado"
+    they are valued at their market price (opportunity cost). Returns (coste, origen, receta_id).
     """
     ctx = _ctx or _Contexto(cat, precios, ajustes, niveles, faccion, precios_npc)
     if inventario and inventario.get(int(objeto_id), inventario.get(str(objeto_id), 0)) > 0:
@@ -270,11 +270,11 @@ def coste_adquisicion(objeto_id, cat, precios, ajustes=None, niveles=None, facci
     return coste, origen, receta_id
 
 
-# --- suministro por tramos ---------------------------------------------------
+# --- tiered supply -----------------------------------------------------------
 
 def _tramos(ctx, oid, en_inventario, pila):
-    """Fuentes de un ingrediente ordenadas por coste: [(precio, cantidad, origen, receta_id)].
-    Devuelve (tramos, stock_conocido)."""
+    """Sources of an ingredient sorted by cost: [(precio, cantidad, origen, receta_id)].
+    Returns (tramos, stock_conocido)."""
     tramos = []
     precio_mercado = ctx.precio_mercado(oid)
     if en_inventario > 0:
@@ -304,7 +304,7 @@ def _tramos(ctx, oid, en_inventario, pila):
     if fabricar is not None:
         resto.append((fabricar, INF, "fabricar", receta_id))
     resto.sort(key=lambda t: (t[0], ORDEN_ORIGEN[t[2]]))
-    # a partir de la primera fuente ilimitada, el resto sobra
+    # after the first unlimited source, the rest are not needed
     recortado = []
     for t in resto:
         recortado.append(t)
@@ -314,8 +314,8 @@ def _tramos(ctx, oid, en_inventario, pila):
 
 
 def _comprar(tramos, unidades):
-    """Coste de conseguir `unidades` recorriendo los tramos.
-    Devuelve (coste, {origen: unidades}, faltan_en_mercado, receta_id_fabricar)."""
+    """Cost of getting `unidades` by walking through the tiers.
+    Returns (coste, {origen: unidades}, faltan_en_mercado, receta_id_fabricar)."""
     coste, por_origen, restantes, receta_id = 0.0, {}, unidades, None
     for precio, cantidad, origen, rid in tramos:
         if restantes <= 0:
@@ -327,20 +327,20 @@ def _comprar(tramos, unidades):
             receta_id = rid
         restantes -= tomar
     if restantes > 0 and tramos:
-        # no hay más oferta: se estima el resto al precio del último tramo
+        # no more supply: the rest is estimated at the last tier's price
         coste += tramos[-1][0] * restantes
     return coste, por_origen, max(restantes, 0), receta_id
 
 
 def _max_intentos(lista, ingreso, tope=1_000_000):
-    """Intentos rentables con el suministro disponible (coste marginal por tramos).
-    lista = [(tramos, cantidad_por_intento)]. None = sin límite conocido."""
+    """Profitable attempts with the available supply (marginal cost by tiers).
+    lista = [(tramos, cantidad_por_intento)]. None = no known limit."""
     estado = [[0, t[0][1] if t else 0] for t, _ in lista]
     if any(not t for t, _ in lista):
         return 0
     n = 0
     while n < tope:
-        # ¿cuántos intentos seguidos a coste marginal constante?
+        # how many consecutive attempts at a constant marginal cost?
         bloque, marginal, lento = INF, 0.0, False
         for (tramos, q), st in zip(lista, estado):
             while st[0] < len(tramos) and st[1] <= 0:
@@ -354,7 +354,7 @@ def _max_intentos(lista, ingreso, tope=1_000_000):
             else:
                 lento = True
         if lento:
-            # un intento que cruza tramos: se simula sobre una copia
+            # an attempt that crosses tiers: simulated on a copy
             marginal, copia = 0.0, [list(s) for s in estado]
             for (tramos, q), st in zip(lista, copia):
                 falta = q
@@ -384,11 +384,11 @@ def _max_intentos(lista, ingreso, tope=1_000_000):
     return n
 
 
-# --- análisis de una receta --------------------------------------------------
+# --- recipe analysis ---------------------------------------------------------
 
 def analizar_receta(receta, cat, precios, ajustes, nivel, inventario=None, intentos=1, *,
                     niveles=None, faccion=None, precios_npc=None, ahora=None, _ctx=None) -> dict:
-    """Rentabilidad esperada de `intentos` intentos de una receta. Ver docs/contratos.md §3."""
+    """Expected profitability of `intentos` attempts of a recipe. See docs/contratos.md §3."""
     if _ctx is None:
         niveles = dict(niveles or {})
         niveles.setdefault(receta["profesion"], nivel)
@@ -407,7 +407,7 @@ def analizar_receta(receta, cat, precios, ajustes, nivel, inventario=None, inten
     if not probs["curvas_conocidas"]:
         avisos.append("Curva de éxito desconocida en el catálogo: se asume 100%.")
 
-    # ingredientes
+    # ingredients
     pila = frozenset(probs["salidas"].keys())
     desglose, lista_tramos, edades = [], [], []
     coste_total, coste_faltante, sin_precio = 0.0, 0.0, False
@@ -448,7 +448,7 @@ def analizar_receta(receta, cat, precios, ajustes, nivel, inventario=None, inten
     if sin_precio:
         coste_total = coste_faltante = None
 
-    # venta
+    # sale
     neto = 1 - float(aj["comision_registro"]) - float(aj["impuesto_venta"])
     rebaja = float(aj["rebaja_listado"])
     precio_base = ctx.precio_mercado(producto)
@@ -483,7 +483,7 @@ def analizar_receta(receta, cat, precios, ajustes, nivel, inventario=None, inten
 
     max_intentos = None if sin_precio else _max_intentos(lista_tramos, ingreso)
 
-    # avisos de mercado
+    # market warnings
     limite = float(aj["horas_precio_antiguo"])
     for edad, oid in sorted(set(edades), reverse=True):
         if edad > limite:
@@ -504,7 +504,7 @@ def analizar_receta(receta, cat, precios, ajustes, nivel, inventario=None, inten
         avisos.append(f"Producirás ~{unidades_venta} unidades: necesitarás {anuncios_necesarios} anuncios "
                       f"y el máximo es {aj['max_anuncios']} a la vez.")
 
-    # inventario
+    # inventory
     intentos_con_inventario = 0 if intentos_con_inventario == INF else int(intentos_con_inventario)
     faltan = [{"id": f["id"], "nombre": f["nombre"], "faltan": f["faltan"], "coste": f["coste_faltante"]}
               for f in desglose if f["faltan"] > 0]
@@ -555,14 +555,14 @@ def analizar_receta(receta, cat, precios, ajustes, nivel, inventario=None, inten
 # --- panel -------------------------------------------------------------------
 
 FILTROS_POR_DEFECTO = {
-    "profesion": None,            # str o lista de claves
-    "inversion_max": None,        # Kinah a desembolsar (lo que no tienes en inventario)
-    "margen_min": None,           # fracción (0.10 = 10%)
-    "incluir_intermedios": True,  # productos que son ingrediente de otras recetas
+    "profesion": None,            # str or list of keys
+    "inversion_max": None,        # Kinah to spend (what you don't have in inventory)
+    "margen_min": None,           # fraction (0.10 = 10%)
+    "incluir_intermedios": True,  # products that are ingredients of other recipes
     "solo_desbloqueadas": True,
     "solo_rentables": True,
     "incluir_sin_precio": False,
-    "tope_intentos": None,        # por defecto ajustes["tope_intentos"]
+    "tope_intentos": None,        # defaults to ajustes["tope_intentos"]
     "ordenar_por": "beneficio_total",  # | "beneficio_intento" | "margen"
     "limite": None,
 }
@@ -570,7 +570,7 @@ FILTROS_POR_DEFECTO = {
 
 def mejores_oportunidades(cat, precios, ajustes, niveles, faccion, inventario=None, filtros=None, *,
                           precios_npc=None, ahora=None) -> list:
-    """Recetas de la facción ordenadas por beneficio esperado, con intentos recomendados."""
+    """Faction recipes sorted by expected profit, with recommended attempts."""
     f = dict(FILTROS_POR_DEFECTO)
     f.update({k: v for k, v in (filtros or {}).items() if v is not None})
     ctx = _Contexto(cat, precios, ajustes, niveles, faccion, precios_npc, ahora)
@@ -611,7 +611,7 @@ def mejores_oportunidades(cat, precios, ajustes, niveles, faccion, inventario=No
         n = tope if a["max_intentos_mercado"] is None else min(tope, a["max_intentos_mercado"])
         n = max(n, 1)
         if f["inversion_max"] is not None and n > 1:
-            bajo, alto = 1, n  # mayor n con inversión <= máximo
+            bajo, alto = 1, n  # largest n with investment <= maximum
             while bajo < alto:
                 medio = (bajo + alto + 1) // 2
                 if inversion(analizar(r, medio)) <= f["inversion_max"]:

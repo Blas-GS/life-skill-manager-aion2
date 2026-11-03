@@ -1,10 +1,10 @@
-"""Importar un vídeo grabado del mercado (OBS, Xbox Game Bar Win+Alt+R...).
+"""Import a recorded video of the market (OBS, Xbox Game Bar Win+Alt+R...).
 
-Extrae ~3 fotogramas por segundo con OpenCV, descarta los repetidos o movidos
-(mismo `Deduplicador` que el modo grabación), hace OCR de los distintos y
-devuelve las filas consolidadas. Los fotogramas solo existen en memoria; el
-vídeo NO se borra aquí: lo borra `temporales.limpiar_verificados` cuando las
-lecturas ya están guardadas y verificadas en la base de datos.
+Extracts ~3 frames per second with OpenCV, discards repeated or blurry ones
+(same `Deduplicador` as recording mode), runs OCR on the distinct ones and
+returns the consolidated rows. Frames only exist in memory; the video is NOT
+deleted here: `temporales.limpiar_verificados` deletes it once the readings
+are saved and verified in the database.
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def _abrir(ruta: str):
     cap = cv2.VideoCapture(ruta)
     if cap.isOpened():
         return cap
-    # OpenCV puede fallar con rutas con tildes en Windows: probar la ruta corta 8.3.
+    # OpenCV can fail with accented paths on Windows: try the 8.3 short path.
     if os.name == "nt" and not ruta.isascii():
         try:
             import ctypes
@@ -51,9 +51,9 @@ def procesar_video(
     devolver_estadisticas: bool = False,
     faccion: str | None = None,
 ):
-    """Lee un vídeo y devuelve list[FilaMercado] consolidadas.
+    """Reads a video and returns a consolidated list[FilaMercado].
 
-    Con `devolver_estadisticas=True` devuelve (filas, {"muestreados", "procesados", ...}).
+    With `devolver_estadisticas=True` returns (filas, {"muestreados", "procesados", ...}).
     """
     import cv2
 

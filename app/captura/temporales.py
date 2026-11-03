@@ -1,21 +1,21 @@
-"""Gestión de archivos temporales: nada se acumula y nada se borra sin verificar.
+"""Temporary file management: nothing piles up and nothing is deleted unverified.
 
-Registro en `capturas/tmp/registro.json`:
+Registry in `capturas/tmp/registro.json`:
 {
   "version": 1,
   "archivos": { "<ruta absoluta>": {"tipo": "video"|"captura", "ids": ["uuid", ...], "registrado": "..."} },
   "recortes": { "<ruta absoluta>": {"revisado": false, "objeto_id": 123, "nombre_leido": "...", "registrado": "..."} }
 }
 
-Flujo:
-  1. Se procesa un vídeo/captura → el usuario revisa → `repo.guardar_lecturas(...)` → ids.
+Flow:
+  1. A video/screenshot is processed → the user reviews → `repo.guardar_lecturas(...)` → ids.
   2. `registrar_temporal(ruta, ids)`.
-  3. `limpiar_verificados(repo)` (al arrancar y tras cada guardado): borra un archivo
-     SOLO si `repo.verificar_lecturas(ids)` devuelve exactamente True. Si devuelve
-     False, lanza una excepción o no hay ids, el archivo se conserva.
-  4. Los recortes de filas dudosas (`capturas/tmp/revision/`) se borran cuando
-     el usuario las ha revisado (`marcar_revisado` + `limpiar_revisados`).
-  5. `aplicar_tope(mb)` avisa si `capturas/tmp/` supera el tope; no borra nada sin verificar.
+  3. `limpiar_verificados(repo)` (on startup and after each save): deletes a file
+     ONLY if `repo.verificar_lecturas(ids)` returns exactly True. If it returns
+     False, raises an exception or there are no ids, the file is kept.
+  4. Crops of doubtful rows (`capturas/tmp/revision/`) are deleted once
+     the user has reviewed them (`marcar_revisado` + `limpiar_revisados`).
+  5. `aplicar_tope(mb)` warns if `capturas/tmp/` exceeds the cap; it deletes nothing unverified.
 """
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ class Temporales:
         self.ruta_registro = self.dir_tmp / "registro.json"
         self._lock = threading.RLock()
 
-    # -- persistencia --
+    # -- persistence --
     def _cargar(self) -> dict:
         try:
             datos = json.loads(self.ruta_registro.read_text(encoding="utf-8"))
@@ -73,10 +73,10 @@ class Temporales:
         with self._lock:
             return self._cargar()
 
-    # -- archivos de origen (vídeos, capturas) --
+    # -- source files (videos, screenshots) --
     def registrar_temporal(self, ruta, lecturas_ids, tipo: str | None = None) -> dict:
-        """Asocia un archivo con los ids de las lecturas guardadas a partir de él.
-        Se puede llamar varias veces: los ids se acumulan."""
+        """Associates a file with the ids of the readings saved from it.
+        Can be called several times: the ids accumulate."""
         clave = _clave(ruta)
         with self._lock:
             datos = self._cargar()
@@ -96,9 +96,9 @@ class Temporales:
             return _clave(ruta) in self._cargar()["archivos"]
 
     def limpiar_verificados(self, repo) -> dict:
-        """Borra los archivos cuyas lecturas confirma `repo.verificar_lecturas(ids)`.
+        """Deletes the files whose readings `repo.verificar_lecturas(ids)` confirms.
 
-        Devuelve {"borrados": [...], "conservados": [...], "errores": {ruta: motivo}}.
+        Returns {"borrados": [...], "conservados": [...], "errores": {ruta: motivo}}.
         """
         borrados, conservados, errores = [], [], {}
         with self._lock:
@@ -110,7 +110,7 @@ class Temporales:
                     continue
                 try:
                     ok = repo.verificar_lecturas(list(ids))
-                except Exception as e:  # noqa: BLE001 — sin conexión, etc.
+                except Exception as e:  # noqa: BLE001 — no connection, etc.
                     errores[ruta] = f"No se pudo verificar: {e}"
                     conservados.append(ruta)
                     continue
@@ -129,7 +129,7 @@ class Temporales:
             self._guardar(datos)
         return {"borrados": borrados, "conservados": conservados, "errores": errores}
 
-    # -- recortes de filas dudosas --
+    # -- crops of doubtful rows --
     def registrar_recorte(self, ruta, fila: dict | None = None) -> None:
         fila = fila or {}
         with self._lock:
@@ -166,7 +166,7 @@ class Temporales:
             return False
 
     def limpiar_revisados(self) -> list[str]:
-        """Borra los recortes ya revisados (solo dentro de capturas/tmp)."""
+        """Deletes the already reviewed crops (only inside capturas/tmp)."""
         borrados = []
         with self._lock:
             datos = self._cargar()
@@ -184,7 +184,7 @@ class Temporales:
             self._guardar(datos)
         return borrados
 
-    # -- tamaño --
+    # -- size --
     def tamano_mb(self) -> float:
         total = 0
         if self.dir_tmp.is_dir():
@@ -197,9 +197,9 @@ class Temporales:
         return total / (1024 * 1024)
 
     def aplicar_tope(self, mb: float = 500, repo=None) -> dict:
-        """Comprueba el tamaño de capturas/tmp. Si lo supera y hay `repo`, intenta
-        antes limpiar lo verificado y los recortes revisados. Nunca borra nada sin
-        verificar: si sigue por encima, solo avisa."""
+        """Checks the size of capturas/tmp. If it exceeds the cap and there is a `repo`,
+        it first tries to clean up verified files and reviewed crops. It never deletes
+        anything unverified: if still over the cap, it only warns."""
         tamano = self.tamano_mb()
         limpieza = None
         if tamano > mb:
@@ -227,13 +227,13 @@ class Temporales:
 
 
 # --------------------------------------------------------------------------
-# Funciones de módulo sobre la instancia por defecto (capturas/tmp)
+# Module-level functions on the default instance (capturas/tmp)
 # --------------------------------------------------------------------------
 _por_defecto = Temporales()
 
 
 def configurar(dir_tmp) -> Temporales:
-    """Cambia la carpeta de temporales por defecto (útil en tests)."""
+    """Changes the default temporary folder (useful in tests)."""
     global _por_defecto
     _por_defecto = Temporales(dir_tmp)
     return _por_defecto

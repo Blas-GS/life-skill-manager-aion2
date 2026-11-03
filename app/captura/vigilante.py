@@ -1,22 +1,22 @@
-"""Vigila una carpeta de capturas sueltas (Impr Pant, F12 de Steam...) y las lee.
+"""Watches a folder of loose screenshots (Print Screen, Steam F12...) and reads them.
 
-Sondeo simple (sin dependencias nuevas): cada `intervalo` segundos lista la
-carpeta y procesa las imágenes nuevas cuyo tamaño ya no cambia (evita leer una
-captura a medio escribir). No borra nada: las imágenes se borran con
-`temporales.limpiar_verificados` cuando sus lecturas están guardadas y
-verificadas. Las imágenes ya registradas en temporales no se reprocesan.
+Simple polling (no new dependencies): every `intervalo` seconds it lists the
+folder and processes new images whose size no longer changes (avoids reading a
+half-written screenshot). It deletes nothing: images are deleted by
+`temporales.limpiar_verificados` once their readings are saved and verified.
+Images already registered in temporales are not reprocessed.
 
-Carpeta vigilada (en este orden):
-  1. el parámetro `carpeta`;
-  2. la variable de entorno `AION2_CARPETA_CAPTURAS` (p.ej. en `.env`);
-  3. `capturas/pendientes` dentro del proyecto.
+Watched folder (in this order):
+  1. the `carpeta` parameter;
+  2. the `AION2_CARPETA_CAPTURAS` environment variable (e.g. in `.env`);
+  3. `capturas/pendientes` inside the project.
 
-Para usar las capturas de Steam (F12): Steam > Ajustes > Capturas de pantalla >
-"Carpeta de capturas" muestra la ruta; la de por defecto es
-  C:\\Program Files (x86)\\Steam\\userdata\\<id_usuario>\\760\\remote\\<id_app>\\screenshots
-`carpetas_steam()` lista las que existan. Ojo: tras verificar las lecturas se
-borran las imágenes de esa carpeta (es lo que se quiere para no acumular); si
-prefieres conservarlas, cambia en Steam la carpeta a `capturas/pendientes`.
+To use Steam screenshots (F12): Steam > Settings > Screenshots >
+"Screenshot folder" shows the path; the default one is
+  C:\\Program Files (x86)\\Steam\\userdata\\<user_id>\\760\\remote\\<app_id>\\screenshots
+`carpetas_steam()` lists the ones that exist. Note: once the readings are verified,
+the images in that folder are deleted (that is intended, so nothing piles up); if
+you prefer to keep them, change the Steam folder to `capturas/pendientes`.
 """
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ def carpeta_configurada(carpeta=None) -> Path:
 
 
 def carpetas_steam() -> list[str]:
-    """Carpetas de capturas de Steam que existen en este PC (solo lectura)."""
+    """Steam screenshot folders that exist on this PC (read-only)."""
     bases = [
         os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "Steam"),
         os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Steam"),
@@ -54,8 +54,8 @@ def carpetas_steam() -> list[str]:
 
 
 class Vigilante:
-    """`al_procesar(ruta, filas)` se llama por cada imagen leída;
-    `al_error(ruta, excepcion)` si falla."""
+    """`al_procesar(ruta, filas)` is called for each image read;
+    `al_error(ruta, excepcion)` if it fails."""
 
     def __init__(self, carpeta=None, cat=None, intervalo: float = 2.0,
                  al_procesar: Callable[[str, list], None] | None = None,
@@ -71,17 +71,17 @@ class Vigilante:
         self.region = region
         self.columnas = columnas
         self.idioma = idioma
-        self._vistos: dict[str, tuple] = {}      # ruta -> (tamaño, mtime) ya procesado/fallido
-        self._candidatos: dict[str, tuple] = {}  # ruta -> (tamaño, mtime) visto una vez
-        self.resultados: dict[str, list] = {}     # ruta -> filas (hasta que se recojan)
+        self._vistos: dict[str, tuple] = {}      # path -> (size, mtime) already processed/failed
+        self._candidatos: dict[str, tuple] = {}  # path -> (size, mtime) seen once
+        self.resultados: dict[str, list] = {}     # path -> rows (until collected)
         self.errores: dict[str, str] = {}
         self._hilo: threading.Thread | None = None
         self._parar = threading.Event()
         self._lock = threading.Lock()
 
-    # -- una pasada --
+    # -- one pass --
     def revisar(self) -> list[tuple[str, list]]:
-        """Una pasada de sondeo. Devuelve [(ruta, filas)] de las imágenes leídas ahora."""
+        """One polling pass. Returns [(ruta, filas)] for the images read now."""
         if not self.carpeta.is_dir():
             return []
         leidas = []
@@ -101,7 +101,7 @@ class Vigilante:
             if temporales.esta_registrado(ruta):
                 self._vistos[ruta] = firma
                 continue
-            # Esperar a que el archivo deje de crecer (dos sondeos iguales).
+            # Wait until the file stops growing (two identical polls).
             if self._candidatos.get(ruta) != firma or st.st_size == 0:
                 self._candidatos[ruta] = firma
                 continue
@@ -121,7 +121,7 @@ class Vigilante:
             leidas.append((ruta, filas))
             if self.al_procesar:
                 self.al_procesar(ruta, filas)
-        # Olvidar archivos que ya no existen.
+        # Forget files that no longer exist.
         for ruta in list(self._vistos):
             if ruta not in actuales:
                 self._vistos.pop(ruta, None)
@@ -134,19 +134,19 @@ class Vigilante:
         return leidas
 
     def procesar_archivo(self, ruta) -> list[dict]:
-        # Se carga en memoria y se cierra el archivo para que luego se pueda borrar.
+        # Loaded into memory and the file closed so it can be deleted later.
         with Image.open(ruta) as im:
             img = im.convert("RGB")
         return procesar_imagen(img, self.indice, region=self.region, columnas=self.columnas,
                                idioma=self.idioma)
 
     def recoger(self) -> dict[str, list]:
-        """Devuelve y vacía las filas leídas pendientes de revisar/guardar."""
+        """Returns and clears the rows read that are pending review/save."""
         with self._lock:
             r, self.resultados = self.resultados, {}
         return r
 
-    # -- hilo --
+    # -- thread --
     def iniciar(self) -> "Vigilante":
         if self._hilo and self._hilo.is_alive():
             return self
