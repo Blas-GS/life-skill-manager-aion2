@@ -1,93 +1,93 @@
 # Life Skill Manager - Aion 2
 
-**Proyecto Open Source** (licencia MIT). Se aceptan PRs de corrección de errores y mejoras del código, sujetos a la aprobación del autor. Si quieres implementar una funcionalidad nueva o un cambio de comportamiento, **abre primero un issue** para comentarlo antes de programarlo. Ver [Contribuir](#contribuir).
+**Open Source project** (MIT license). Pull requests that fix bugs or improve the code are welcome and are merged subject to the author's approval. If you want to add a new feature or change how something behaves, **open an issue first** to discuss it before writing code. See [Contributing](#contributing).
 
-Herramienta local para saber **qué recetas de artesanía de AION 2 te conviene fabricar ahora**, comprando los ingredientes en el mercado de tu servidor y vendiendo el producto. Tiene en cuenta tus niveles de las 5 profesiones, tu inventario/almacén, la comisión de registro e impuesto de venta, la probabilidad de éxito y de combo, la profundidad del mercado y el histórico de precios.
+A local tool that tells you **which AION 2 crafting recipes are worth making right now**, buying the ingredients on your server's market and selling the product. It takes into account your levels in the 5 professions, your inventory and warehouse, the listing fee and sales tax, the success and combo chances, market depth and price history.
 
-Pestañas: **Panel** (mejores oportunidades, lista de la compra), **Mercado** (precios, histórico, precio objetivo, entrada manual), **Captura** (lectura pasiva del mercado por OCR), **Recetas** (árbol de ingredientes, comprar o fabricar), **Personaje** (perfiles, servidores, niveles, inventario) y **Ajustes**.
+Tabs: **Dashboard** (best opportunities, shopping list), **Market** (prices, history, target price, manual entry), **Capture** (passive OCR reading of the market), **Recipes** (ingredient tree, buy or craft), **Character** (profiles, servers, levels, inventory) and **Settings**.
 
-## Arrancar
+The interface uses the official item names of the Spanish game client; an ES/EN language switch is in progress.
 
-Doble clic en **`iniciar.bat`**. La primera vez crea el entorno de Python (`.venv`, con Python 3.14) e instala las dependencias; después arranca la app y abre `http://localhost:8000`.
+## Getting started
 
-A mano:
+Double-click **`iniciar.bat`**. The first time, it creates the Python environment (`.venv`, Python 3.14) and installs the dependencies; then it starts the app and opens `http://localhost:8000`.
+
+Manually:
 
 ```bash
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000
 ```
 
-Primeros pasos:
-1. **Personaje** → crea tu servidor (nombre y facción) y tu perfil; pon tus niveles.
-2. Siembra precios: lee el mercado (**Captura**), apúntalos a mano (**Mercado**) o importa el Excel:
+First steps:
+1. **Character** → create your server (name and faction) and your profile; enter your levels.
+2. Seed prices: read the market (**Capture**), type them in (**Market**) or import an Excel sheet:
 
 ```bash
-.\.venv\Scripts\python.exe tools\importar_excel.py --servidor <id_del_servidor>
+.\.venv\Scripts\python.exe tools\importar_excel.py --servidor <server_id>
 ```
 
-   (`--simular` muestra el informe sin guardar. Los precios quedan con fecha 09/10/2026.)
-3. **Panel** → recetas ordenadas por beneficio.
+   (`--simular` shows the report without saving.)
+3. **Dashboard** → recipes sorted by profit.
 
-El catálogo de recetas (`data/catalogo.json`) **no viene en el repositorio**: `iniciar.bat` lo genera la primera vez con `tools\importar_metabot.py`, que lo descarga de metabot.gg a un ritmo pausado (una petición cada 2 s, con caché para no repetir). Tarda unos minutos.
+The recipe catalog (`data/catalogo.json`) **is not included in the repository**: `iniciar.bat` builds it the first time with `tools\importar_metabot.py`, which downloads it from metabot.gg at a slow pace (one request every 2 s, cached so nothing is fetched twice). It takes a few minutes.
 
-## Base de datos: tu propio Supabase (o local)
+## Database: your own Supabase (or local)
 
-**Cada persona usa su propia base de datos.** Este repositorio no incluye ni comparte ninguna base de datos, URL ni clave: tus precios, tu inventario y tu histórico van a **tu** cuenta de Supabase, y nadie más los ve.
+**Everyone uses their own database.** This repository does not include or share any database, URL or key: your prices, inventory and history go to **your** Supabase account, and nobody else can see them.
 
-- **Sin configurar nada**, todo se guarda en tu PC, en `data/aion2.db` (SQLite). Funciona igual, pero el histórico no sale de ese equipo.
-- **Con Supabase** (gratis), el histórico queda en la nube y sobrevive a un cambio de PC. Una sola vez:
-  1. Crea una cuenta en [supabase.com](https://supabase.com) y un proyecto nuevo (plan **Free**, región **Central EU (Frankfurt)** o la más cercana).
-  2. En tu proyecto: **SQL Editor → New query**, pega todo [`supabase/esquema.sql`](supabase/esquema.sql) y pulsa **Run**. Crea las tablas con acceso bloqueado para las claves públicas.
-  3. `iniciar.bat` crea un archivo `.env` a partir de [`.env.example`](.env.example). Ábrelo y pon:
-     - `SUPABASE_URL=` la **Project URL** de tu proyecto (`https://<tu-proyecto>.supabase.co`).
-     - `SUPABASE_KEY=` tu clave **secreta** (`sb_secret_...`, en **Project Settings → API Keys**).
-  4. Reinicia la app. En **Ajustes** debe poner "Base de datos: Supabase".
+- **With no setup**, everything is stored on your PC in `data/aion2.db` (SQLite). It works the same, but the history stays on that machine.
+- **With Supabase** (free), the history lives in the cloud and survives a change of PC. One-time setup:
+  1. Create an account at [supabase.com](https://supabase.com) and a new project (**Free** plan, region **Central EU (Frankfurt)** or the closest one).
+  2. In your project: **SQL Editor → New query**, paste the whole [`supabase/esquema.sql`](supabase/esquema.sql) and click **Run**. It creates the tables with access blocked for public keys.
+  3. `iniciar.bat` creates a `.env` file from [`.env.example`](.env.example). Open it and fill in:
+     - `SUPABASE_URL=` your project's **Project URL** (`https://<your-project>.supabase.co`).
+     - `SUPABASE_KEY=` your **secret** key (`sb_secret_...`, under **Project Settings → API Keys**).
+  4. Restart the app. **Settings** should show "Database: Supabase".
 
-Guía detallada, seguridad y qué hacer si el proyecto se pausa: [docs/supabase.md](docs/supabase.md).
+Detailed guide, security notes and what to do if the project gets paused: [docs/supabase.md](docs/supabase.md).
 
-> `.env` está en `.gitignore`: **nunca** lo subas a GitHub ni compartas tu clave secreta. Solo la usa el programa en tu PC; nunca llega al navegador.
+> `.env` is listed in `.gitignore`: **never** upload it to GitHub or share your secret key. Only the program on your PC uses it; it never reaches the browser.
 
-Sin conexión, las lecturas se guardan en una cola (`data/pendientes.jsonl`) y se suben solas al volver.
+When offline, market readings are stored in a local queue (`data/pendientes.jsonl`) and uploaded automatically once the connection is back.
 
-## Leer el mercado sin riesgo de baneo
+## Reading the market without risking a ban
 
-AION 2 tiene anticheat (NCGuard) y NCSOFT prohíbe la automatización. Por eso **la app nunca toca el juego**: no envía clics ni teclas, no lee su memoria, no modifica el cliente ni captura su tráfico de red. Solo mira la pantalla, igual que una grabación de vídeo:
+AION 2 has an anti-cheat (NCGuard) and NCSOFT forbids automation. That is why **the app never touches the game**: it does not send clicks or keystrokes, read its memory, modify the client or capture its network traffic. It only looks at the screen, just like a video recording:
 
-- **Modo grabación**: pulsa *Empezar lectura*, recorre tú el mercado con ratón y teclado, y pulsa *Terminar*. Los fotogramas se procesan en memoria.
-- **Vídeo**: graba con OBS o la Xbox Game Bar (Win+Alt+R) y arrástralo a *Captura*.
-- **Captura suelta**: F12 de Steam o Impr Pant, y súbela.
+- **Recording mode**: click *Start reading*, browse the market yourself with mouse and keyboard, then click *Finish*. Frames are processed in memory.
+- **Video**: record with OBS or the Xbox Game Bar (Win+Alt+R) and drop the file into *Capture*.
+- **Single screenshot**: Steam's F12 or Print Screen, then upload it.
 
-Calibra una vez la zona de la lista (pestaña *Captura*) y revisa las filas dudosas antes de guardar. Los vídeos y capturas se borran solos cuando sus datos están guardados y verificados.
+Calibrate the list area once (*Capture* tab) and review uncertain rows before saving. Videos and screenshots are deleted automatically once their data has been saved and verified.
 
-## Pruebas
+## Tests
 
 ```bash
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-## Aviso legal
+## Legal notice
 
-- **Herramienta no oficial.** No está afiliada, patrocinada ni aprobada por NCSOFT. AION y AION 2 son marcas de NCSOFT Corporation; se nombran solo para indicar con qué juego funciona.
-- **No automatiza el juego.** No envía entradas, no lee ni modifica la memoria o los archivos del cliente, no intercepta su tráfico de red y no elude el anticheat. Solo procesa imágenes de tu propia pantalla que tú generas navegando el mercado a mano.
-- **Úsala bajo tu responsabilidad.** Las normas de NCSOFT sobre programas de terceros pueden cambiar y no publican una lista de herramientas permitidas. Revisa sus condiciones antes de usarla; el autor no se hace responsable de sanciones sobre tu cuenta.
-- **Sin garantías.** Los cálculos de rentabilidad son estimaciones; ver [LICENSE](LICENSE).
-- **Uso personal y sin ánimo de lucro.** No vende datos ni servicios, ni comercia con dinero real.
-- **Datos del juego.** Los nombres de objetos, recetas y probabilidades pertenecen a NCSOFT. Este repositorio no los redistribuye: cada usuario genera su catálogo en local.
+- **Unofficial tool.** It is not affiliated with, sponsored or endorsed by NCSOFT. AION and AION 2 are trademarks of NCSOFT Corporation; they are mentioned only to indicate which game this tool works with.
+- **It does not automate the game.** It sends no input, does not read or modify the client's memory or files, does not intercept its network traffic and does not bypass the anti-cheat. It only processes images of your own screen, produced by you browsing the market by hand.
+- **Use it at your own risk.** NCSOFT's rules on third-party programs may change and no list of allowed tools is published. Check their terms before using it; the author is not responsible for any penalty on your account.
+- **No warranty.** Profitability figures are estimates; see [LICENSE](LICENSE).
+- **Personal, non-profit use.** It does not sell data or services, and it does not involve real-money trading.
+- **Game data.** Item names, recipes and probabilities belong to NCSOFT. This repository does not redistribute them: each user builds their catalog locally.
 
-## Atribución
+## Attribution
 
-Datos de recetas, objetos y curvas de éxito: [MetaBot.GG — AION 2 Crafting](https://metabot.gg/es_ES/aion-2/crafting), según su [condición de atribución](https://metabot.gg/en/ai). Las condiciones de uso de metabot.gg ([Terms of Service](https://metabot.gg/en/legal/terms-of-service)) permiten el uso personal y no comercial.
+Recipe, item and success-curve data: [MetaBot.GG — AION 2 Crafting](https://metabot.gg/es_ES/aion-2/crafting), following their [attribution requirement](https://metabot.gg/en/ai). The metabot.gg [Terms of Service](https://metabot.gg/en/legal/terms-of-service) allow personal, non-commercial use.
 
-## Contribuir
+## Contributing
 
-Este es un proyecto Open Source y las contribuciones son bienvenidas:
+This is an open-source project and contributions are welcome:
 
-- **Correcciones de errores y mejoras del código** (rendimiento, limpieza, pruebas, documentación, OCR): abre un PR directamente. Se revisa y se fusiona solo con la aprobación del autor.
-- **Funcionalidades nuevas o cambios de comportamiento** (nuevas pantallas, cambios en el cálculo de rentabilidad, nuevas fuentes de datos…): **abre primero un issue** para comentarlo con el autor antes de programarlo. Así nadie pierde tiempo en un PR que no encaje con el rumbo del proyecto.
+- **Bug fixes and code improvements** (performance, cleanup, tests, documentation, OCR accuracy): open a PR directly. It is reviewed and merged only with the author's approval.
+- **New features or behaviour changes** (new screens, changes to the profitability calculation, new data sources…): **open an issue first** to discuss it with the author before writing code. That way nobody wastes time on a PR that does not fit the project's direction.
 
-Normas y pasos en [CONTRIBUTING.md](CONTRIBUTING.md).
+Rules and steps in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-*English: this is an open-source project. Bug-fix and code-improvement PRs are welcome and merged at the author's discretion. For new features or behaviour changes, please open an issue first to discuss them.*
+## License
 
-## Licencia
-
-Código bajo licencia [MIT](LICENSE). La licencia no cubre los datos del juego ni los de metabot.gg.
+Code released under the [MIT](LICENSE) license. The license does not cover game data or metabot.gg data.

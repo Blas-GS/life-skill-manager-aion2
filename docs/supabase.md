@@ -1,39 +1,39 @@
-# Configurar Supabase (base de datos personal)
+# Setting up Supabase (personal database)
 
-**Cada usuario conecta la app a su propio proyecto de Supabase, en su propia cuenta.** El repositorio no trae ninguna URL ni clave, y no hay una base de datos compartida: si descargas este proyecto, sigue estos pasos con tu cuenta y tus datos solo serán tuyos.
+**Each user connects the app to their own Supabase project, in their own account.** The repository ships with no URL or key, and there is no shared database: if you download this project, follow these steps with your account and your data will be yours alone.
 
-La app funciona sin Supabase: si `.env` no tiene datos, guarda todo en `data/aion2.db` (en tu PC). Supabase sirve para tener el histórico de precios en la nube, sobrevivir a un cambio de PC y, más adelante, consultar el panel desde el móvil.
+The app works without Supabase: if `.env` is empty, everything is stored in `data/aion2.db` (on your PC). Supabase keeps your price history in the cloud, survives a change of PC and, later on, will let you check the dashboard from your phone.
 
-## 1. Crear el proyecto (gratis)
-1. Entra en <https://supabase.com> y crea una cuenta (puedes usar GitHub o tu correo).
-2. **New project**. Elige un nombre (p.ej. `life-skill-manager`), una contraseña de base de datos (guárdala en tu gestor de contraseñas; la app no la necesita) y la región **Central EU (Frankfurt)** o la más cercana.
-3. Deja activada la opción **Data API** si aparece. Espera un par de minutos a que el proyecto esté listo.
+## 1. Create the project (free)
+1. Go to <https://supabase.com> and create an account (you can use GitHub or your email).
+2. **New project**. Choose a name (e.g. `life-skill-manager`), a database password (keep it in your password manager; the app does not need it) and the **Central EU (Frankfurt)** region or the closest one.
+3. Leave the **Data API** option enabled if it appears. Wait a couple of minutes for the project to be ready.
 
-## 2. Crear las tablas
-1. En el menú izquierdo, abre **SQL Editor** → **New query**.
-2. Abre el archivo `supabase/esquema.sql` de este proyecto, copia todo su contenido, pégalo y pulsa **Run**.
-3. Debe terminar con "Success. No rows returned". Puedes volver a ejecutarlo cuando haya cambios: no borra datos.
+## 2. Create the tables
+1. In the left menu, open **SQL Editor** → **New query**.
+2. Open this project's `supabase/esquema.sql` file, copy its whole content, paste it and click **Run**.
+3. It should finish with "Success. No rows returned". You can run it again whenever it changes: it does not delete data.
 
-## 3. Copiar la URL y la clave a `.env`
-1. Abre el archivo `.env` de la carpeta del proyecto. `iniciar.bat` lo crea la primera vez copiando `.env.example`; si no existe, cópialo tú.
-2. En Supabase, pulsa **Connect** (arriba) o ve a **Project Settings → Data API** y copia la **Project URL** (`https://xxxx.supabase.co`) en `SUPABASE_URL=`.
-3. Ve a **Project Settings → API Keys** y copia la clave **secreta** (`sb_secret_...`; en proyectos antiguos se llama `service_role`) en `SUPABASE_KEY=`.
-4. Guarda el archivo. La próxima vez que arranques la app usará Supabase.
+## 3. Copy the URL and key into `.env`
+1. Open the `.env` file in the project folder. `iniciar.bat` creates it the first time by copying `.env.example`; if it does not exist, copy it yourself.
+2. In Supabase, click **Connect** (top) or go to **Project Settings → Data API** and copy the **Project URL** (`https://xxxx.supabase.co`) into `SUPABASE_URL=`.
+3. Go to **Project Settings → API Keys** and copy the **secret** key (`sb_secret_...`; called `service_role` in older projects) into `SUPABASE_KEY=`.
+4. Save the file. The next time you start the app it will use Supabase.
 
-> Pega la clave solo en `.env`. No la pegues en el chat, en capturas, en el navegador ni en ningún otro archivo.
+> Paste the key only into `.env`. Do not paste it into chats, screenshots, the browser or any other file.
 
-## Seguridad: por qué la clave secreta
-- Es una base de datos de **un solo usuario**. El esquema activa RLS (seguridad por filas) en todas las tablas **sin ninguna política** y retira los permisos a los roles públicos. Resultado: la clave pública (`sb_publishable_...` / `anon`) **no puede leer ni escribir nada**, aunque alguien la consiga.
-- La app usa la clave secreta, que se salta el RLS, **solo desde el backend local** (Python, en tu PC). El panel web habla con `localhost`, nunca con Supabase, así que la clave no llega al navegador.
-- La app solo envía la clave por `https://`.
-- Si crees que la clave se ha filtrado: **Project Settings → API Keys** → crea una nueva clave secreta, borra la antigua y actualiza `.env`.
-- En Supabase solo se guardan números y nombres de objetos, nunca imágenes.
+## Security: why the secret key
+- It is a **single-user** database. The schema enables RLS (row level security) on every table **with no policies** and revokes permissions from the public roles. As a result, the public key (`sb_publishable_...` / `anon`) **cannot read or write anything**, even if someone gets hold of it.
+- The app uses the secret key, which bypasses RLS, **only from the local backend** (Python, on your PC). The web dashboard talks to `localhost`, never to Supabase, so the key never reaches the browser.
+- The app only sends the key over `https://`.
+- If you think the key has leaked: **Project Settings → API Keys** → create a new secret key, delete the old one and update `.env`.
+- Only numbers and item names are stored in Supabase, never images.
 
-## Sin conexión
-Si no hay internet o Supabase no responde, las lecturas del mercado se guardan en `data/pendientes.jsonl` y se suben solas en el siguiente guardado con conexión (o desde el panel). Las capturas y vídeos temporales **no se borran** hasta que sus datos están confirmados en Supabase.
+## Offline
+If there is no internet or Supabase does not respond, market readings are stored in `data/pendientes.jsonl` and uploaded automatically on the next save with a connection (or from the dashboard). Temporary screenshots and videos **are not deleted** until their data is confirmed in Supabase.
 
-## Aviso: el plan gratuito se pausa
-Supabase **pausa los proyectos gratuitos tras ~1 semana sin actividad**. Mientras está pausado, la app sigue funcionando y guarda las lecturas en la cola local. Para reactivarlo: entra en supabase.com, abre el proyecto y pulsa **Restore project** (tarda unos minutos); después la cola se sube sola. Los datos no se pierden al pausar.
+## Note: free projects get paused
+Supabase **pauses free projects after ~1 week of inactivity**. While paused, the app keeps working and stores readings in the local queue. To reactivate it: go to supabase.com, open the project and click **Restore project** (it takes a few minutes); the queue is then uploaded automatically. No data is lost while paused.
 
-## Comprobar que funciona
-En **Table Editor** deberías ver las tablas `servidores`, `perfiles`, `lecturas_mercado`, `ofertas`, etc. Tras guardar una lectura desde la app, aparecerá una fila en `lecturas_mercado`. Las vistas `precio_diario` (mínimo, media, p25, mediana y p75 por día) y `ultima_lectura` se consultan igual desde el SQL Editor, p.ej. `select * from precio_diario order by dia desc limit 20;`.
+## Checking that it works
+In **Table Editor** you should see the tables `servidores`, `perfiles`, `lecturas_mercado`, `ofertas`, etc. After saving a reading from the app, a row appears in `lecturas_mercado`. The views `precio_diario` (minimum, mean, p25, median and p75 per day) and `ultima_lectura` can be queried the same way from the SQL Editor, e.g. `select * from precio_diario order by dia desc limit 20;`.
