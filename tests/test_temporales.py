@@ -1,4 +1,4 @@
-"""Tests de temporales: nunca se borra un archivo sin verificar sus lecturas."""
+"""temporales tests: a file is never deleted without verifying its readings."""
 import json
 
 import pytest
@@ -8,11 +8,11 @@ from app.captura.temporales import Temporales
 
 
 class RepoFalso:
-    """Doble del repositorio: verificar_lecturas devuelve lo configurado."""
+    """Repository double: verificar_lecturas returns whatever is configured."""
 
     def __init__(self, respuesta=True, verificados=None, error=None):
         self.respuesta = respuesta
-        self.verificados = verificados  # set de ids válidos (si se da, manda sobre `respuesta`)
+        self.verificados = verificados  # set of valid ids (if given, it overrides `respuesta`)
         self.error = error
         self.llamadas = []
 
@@ -96,7 +96,7 @@ def test_registro_acumula_ids_y_persiste(tmp, tmp_path):
     datos = json.loads(tmp.ruta_registro.read_text(encoding="utf-8"))
     entrada = next(iter(datos["archivos"].values()))
     assert entrada["ids"] == ["1", "2"] and entrada["tipo"] == "video"
-    # Otra instancia sobre la misma carpeta lee el mismo registro.
+    # Another instance on the same folder reads the same registry.
     assert Temporales(tmp.dir_tmp).esta_registrado(a)
 
 

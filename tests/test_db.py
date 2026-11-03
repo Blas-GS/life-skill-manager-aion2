@@ -1,4 +1,4 @@
-"""Tests de app/db.py: SQLite en carpeta temporal y Supabase con un PostgREST simulado."""
+"""Tests for app/db.py: SQLite in a temporary folder and Supabase with a simulated PostgREST."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def lectura(objeto_id=610620013, minutos=0, precio=100.0, ofertas=None, fuente="
 
 
 # ---------------------------------------------------------------------------
-# PostgREST simulado (lo justo para lo que usa app/db.py)
+# Simulated PostgREST (just enough for what app/db.py uses)
 # ---------------------------------------------------------------------------
 
 CLAVES = {
@@ -41,15 +41,15 @@ CLAVES = {
 class FalsoPostgrest:
     def __init__(self):
         self.tablas: dict[str, list[dict]] = {t: [] for t in CLAVES}
-        self.caido = False             # simula sin red
-        self.fallar_tablas: set[str] = set()   # devuelve 503 en estas tablas
-        self.rechazar_tablas: set[str] = set() # devuelve 409 en estas tablas
+        self.caido = False             # simulates no network
+        self.fallar_tablas: set[str] = set()   # returns 503 on these tables
+        self.rechazar_tablas: set[str] = set() # returns 409 on these tables
         self.peticiones: list[httpx.Request] = []
 
     def transporte(self) -> httpx.MockTransport:
         return httpx.MockTransport(lambda req: self.manejar(req))
 
-    # --- filtros -----------------------------------------------------------
+    # --- filters -----------------------------------------------------------
     @staticmethod
     def _cumple(fila: dict, col: str, expr: str) -> bool:
         op, _, val = expr.partition(".")
@@ -152,7 +152,7 @@ def local(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Elección de backend
+# Backend selection
 # ---------------------------------------------------------------------------
 
 def test_obtener_repositorio_elige_backend(tmp_path, monkeypatch):
@@ -192,7 +192,7 @@ def test_cabeceras_segun_tipo_de_clave(tmp_path, falso):
 
 
 # ---------------------------------------------------------------------------
-# Interfaz común: se prueba igual en los dos backends
+# Common interface: tested the same way on both backends
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(params=["local", "supabase"])
@@ -204,7 +204,7 @@ def test_servidores_y_perfiles(repo):
     otro = repo.guardar_servidor({"nombre": "Tiamat", "faccion": "Asmodian"})
     assert otro["faccion"] == "asmodian" and otro["id"]
     assert {s["nombre"] for s in repo.listar_servidores()} == {"Siel", "Tiamat"}
-    # actualizar solo un campo conserva el resto
+    # updating a single field keeps the rest
     repo.guardar_servidor({"id": SRV, "impuesto_venta": 0.08})
     siel = next(s for s in repo.listar_servidores() if s["id"] == SRV)
     assert siel["impuesto_venta"] == 0.08 and siel["nombre"] == "Siel"
@@ -227,7 +227,7 @@ def test_niveles_e_inventario(repo):
     repo.guardar_inventario(p["id"], 630541001, 7)
     assert repo.inventario(p["id"]) == {610620013: 25, 630541001: 7}
     assert len(repo.inventario_detalle(p["id"])) == 3
-    repo.guardar_inventario(p["id"], 630541001, 0)   # 0 = quitar
+    repo.guardar_inventario(p["id"], 630541001, 0)   # 0 = remove
     assert repo.inventario(p["id"]) == {610620013: 25}
 
 
@@ -246,7 +246,7 @@ def test_guardar_verificar_y_leer_lecturas(repo):
     ult = repo.ultimas_lecturas(SRV)
     assert set(ult) == {610620013, 630541001}
     assert ult[610620013].id == a2.id
-    assert ult[610620013].ofertas == [(90.0, 4), (92.0, 2), (95.0, 1)]   # ordenadas por precio
+    assert ult[610620013].ofertas == [(90.0, 4), (92.0, 2), (95.0, 1)]   # sorted by price
     assert ult[610620013].fecha == T0 + timedelta(minutes=30)
     assert ult[630541001].ofertas == []
 
@@ -255,7 +255,7 @@ def test_guardar_verificar_y_leer_lecturas(repo):
     assert repo.historico(SRV, 610620013, T0 + timedelta(minutes=5))[0].id == a2.id
     assert repo.historico(SRV, 610620013, T0, con_ofertas=False)[0].ofertas == []
 
-    # guardar dos veces lo mismo no duplica
+    # saving the same thing twice doesn't duplicate it
     repo.guardar_lecturas([a1])
     assert len(repo.historico(SRV, 610620013, T0 - timedelta(days=1))) == 2
 
@@ -295,7 +295,7 @@ def test_sincronizar_catalogo(repo):
     }
     assert repo.sincronizar_catalogo(datos) == {"objetos": 1, "curvas": 1, "recetas": 1,
                                                 "receta_ingredientes": 2}
-    assert repo.sincronizar_catalogo(datos)["receta_ingredientes"] == 2   # repetible
+    assert repo.sincronizar_catalogo(datos)["receta_ingredientes"] == 2   # repeatable
 
 
 def test_local_vistas_sqlite(local):
@@ -306,7 +306,7 @@ def test_local_vistas_sqlite(local):
 
 
 # ---------------------------------------------------------------------------
-# Supabase: cola offline
+# Supabase: offline queue
 # ---------------------------------------------------------------------------
 
 def test_sin_red_va_a_la_cola_y_se_sube_despues(supa, falso):
@@ -318,7 +318,7 @@ def test_sin_red_va_a_la_cola_y_se_sube_despues(supa, falso):
     assert supa.ruta_cola.exists()
     assert falso.tablas["lecturas_mercado"] == []
 
-    # en cola → no verificada, ni sin red ni con red
+    # queued → not verified, with or without network
     assert supa.verificar_lecturas(res.ids) is False
     falso.caido = False
     assert supa.verificar_lecturas(res.ids) is False
@@ -332,7 +332,7 @@ def test_sin_red_va_a_la_cola_y_se_sube_despues(supa, falso):
 
 
 def test_subida_a_medias_se_reintenta_sin_duplicar(supa, falso):
-    falso.fallar_tablas = {"ofertas"}       # la lectura entra, las ofertas no
+    falso.fallar_tablas = {"ofertas"}       # the reading goes in, the offers don't
     res = supa.guardar_lecturas([lectura()])
     assert res.en_cola is True
     assert len(falso.tablas["lecturas_mercado"]) == 1 and falso.tablas["ofertas"] == []
@@ -393,7 +393,7 @@ def test_rechazo_de_supabase_se_conserva_con_el_error(supa, falso):
     falso.caido = False
     falso.rechazar_tablas = {"lecturas_mercado"}
 
-    # la entrada rechazada no bloquea a las demás... salvo que también sea rechazada
+    # the rejected entry doesn't block the others... unless it is rejected too
     assert supa.subir_pendientes() == 0
     pend = supa.pendientes()
     assert len(pend) == 2 and all(p["intentos"] == 1 and "409" in p["error"] for p in pend)

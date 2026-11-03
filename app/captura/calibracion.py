@@ -1,21 +1,21 @@
-"""Calibración de la zona de la lista del mercado, por resolución de pantalla.
+"""Calibration of the market list area, per screen resolution.
 
 `data/calibracion.json`:
 {
   "version": 1,
-  "monitor": 1,                       # índice de mss (1 = monitor principal)
+  "monitor": 1,                       # mss index (1 = primary monitor)
   "resoluciones": {
     "2560x1440": {
-      "lista":    [x, y, w, h],       # píxeles absolutos de la imagen/pantalla
+      "lista":    [x, y, w, h],       # absolute pixels of the image/screen
       "columnas": {"nombre": [x0, x1], "precio": [x0, x1], "cantidad": [x0, x1]} | null,
-      "escala":   null,               # escala del OCR (null = automática 2–3×)
+      "escala":   null,               # OCR scale (null = automatic 2–3×)
       "actualizado": "2026-11-02T12:00:00Z"
     }
   }
 }
-Mientras no haya calibración para una resolución, la región por defecto es la
-imagen completa. `columnas` es opcional: si se marca, el parser asigna cada
-palabra a su columna por su posición horizontal (más fiable que la heurística).
+Until a resolution is calibrated, the default region is the whole image.
+`columnas` is optional: if marked, the parser assigns each word to its column
+by its horizontal position (more reliable than the heuristic).
 """
 from __future__ import annotations
 
@@ -86,7 +86,7 @@ def _validar_columnas(columnas) -> dict | None:
 
 
 def configuracion_para(ancho: int, alto: int, ruta=None) -> dict:
-    """Calibración completa para una resolución (con valores por defecto)."""
+    """Full calibration for a resolution (with default values)."""
     datos = cargar(ruta).get("resoluciones", {}).get(clave(ancho, alto))
     if not datos:
         return {"lista": [0, 0, int(ancho), int(alto)], "columnas": None, "escala": None, "calibrada": False}
@@ -99,12 +99,12 @@ def configuracion_para(ancho: int, alto: int, ruta=None) -> dict:
 
 
 def region_para(ancho: int, alto: int, ruta=None) -> tuple[int, int, int, int]:
-    """Región (x, y, w, h) de la lista; pantalla completa si no hay calibración."""
+    """Region (x, y, w, h) of the list; full screen if there is no calibration."""
     return tuple(configuracion_para(ancho, alto, ruta)["lista"])
 
 
 def guardar_region(ancho, alto, region, columnas=None, escala=None, ruta=None) -> dict:
-    """Guarda la región que el usuario marca en la interfaz para esa resolución."""
+    """Saves the region the user marks in the UI for that resolution."""
     entrada = {
         "lista": _validar_region(region, ancho, alto),
         "columnas": _validar_columnas(columnas),
@@ -132,7 +132,7 @@ def monitor(ruta=None) -> int:
 
 
 def resolucion_pantalla(indice_monitor: int | None = None) -> tuple[int, int]:
-    """Resolución del monitor (lectura pasiva con mss, sin tocar el juego)."""
+    """Monitor resolution (passive read with mss, without touching the game)."""
     import mss
 
     with mss.mss() as sct:

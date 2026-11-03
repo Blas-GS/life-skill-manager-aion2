@@ -1,128 +1,128 @@
-# Plan: Life Skill Manager - Aion 2 (herramienta de rentabilidad de artesanía)
+# Plan: Life Skill Manager - Aion 2 (crafting profitability tool)
 
-## Contexto
-Quieres saber, en cada momento, qué recetas de AION 2 (cliente EU en español, ambas facciones) te conviene fabricar comprando los ingredientes en el mercado y vendiendo el producto, teniendo en cuenta tu nivel de artesanía, tu inventario/almacén, las comisiones y la probabilidad de éxito/combo. Hoy tienes un HTML (datos inventados/incompletos, nombres sin verificar, impuesto mal modelado) y un Excel en inglés con ~12 recetas y precios del 09/10/2026. El objetivo es una app local con datos reales, histórico de precios y un panel claro de "mejores oportunidades ahora".
+## Context
+You want to know, at any moment, which AION 2 recipes (EU client in Spanish, both factions) are worth crafting by buying the ingredients on the market and selling the product, taking into account your crafting level, your inventory/warehouse, the fees and the success/combo probability. Today you have an HTML file (made-up/incomplete data, unverified names, wrongly modeled tax) and an Excel file in English with ~12 recipes and prices from 09/10/2026. The goal is a local app with real data, price history and a clear "best opportunities right now" dashboard.
 
-### Hallazgos de la investigación (base del diseño)
-- **Recetas**: metabot.gg incrusta en su página de crafteo las **512 recetas del cliente global** como JSON (`self.__next_f`): producto, cantidad, nivel requerido (`mastery`), profesión, ingredientes+cantidades, % combo y curvas de éxito (`curves` c1…c31, índice = niveles por encima de la receta). La versión `/es/` (o `/es_ES/`) da los **nombres oficiales en español** (p.ej. "Mineral de orichalcum", "Okra", "Od", "Esencia de Balaur", "Solomillo wellington de dragón oscuro"). Las páginas de objeto dan precio de tienda NPC y si es comerciable. Piden un enlace de atribución → lo pondremos en la app.
-- **Facción**: el 2º dígito del id de receta separa Elyos/Asmodian (256 c/u). Hay que confirmar cuál es cuál con las estaciones (Altgard/Morheim = Asmodian).
-- **Profesiones**: Herrería, Armadura, Orfebrería, Alquimia, Cocina. Nivel 1–100 (Principiante 1–50, Especialista 51–100).
-- **Mercado**: uno por servidor (cada servidor = una facción). Comisión de registro ≈2% (se paga al listar, no se devuelve) + impuesto de venta ≈10% al liquidar → neto ≈88%. Máx. ~10 anuncios activos. Ambos % serán configurables (el valor real aparece en la ventana del Mercado).
-- **Combo**: tras un éxito, 20–30% de probabilidad de combo con su propia curva; da la versión "Espléndida"/mayor cantidad. El Excel asume que un combo fallido pierde todo → configurable.
-- **Acceso al juego**: no existe API oficial del mercado. El anticheat (NCGuard) detecta entrada simulada y la política de NC prohíbe leer memoria, modificar el cliente o capturar tráfico (baneo permanente). La opción segura es **captura pasiva de pantalla + OCR**: tú navegas el mercado a mano, la app solo lee imágenes, sin tocar el proceso, la memoria ni la red del juego. Nada de clics/teclas automáticas.
-- **Entorno**: Python 3.14.5 en `%LOCALAPPDATA%\Programs\Python\Python314\python.exe` (no está en PATH; el lanzador usará esa ruta). No hay Node ni Git.
+### Research findings (basis of the design)
+- **Recipes**: metabot.gg embeds in its crafting page the **512 recipes of the global client** as JSON (`self.__next_f`): product, quantity, required level (`mastery`), profession, ingredients+quantities, combo % and success curves (`curves` c1…c31, index = levels above the recipe). The `/es/` (or `/es_ES/`) version gives the **official Spanish names** (e.g. "Mineral de orichalcum", "Okra", "Od", "Esencia de Balaur", "Solomillo wellington de dragón oscuro"). Item pages give the NPC shop price and whether the item is tradeable. They ask for an attribution link → we will put it in the app.
+- **Faction**: the 2nd digit of the recipe id separates Elyos/Asmodian (256 each). Which is which must be confirmed with the stations (Altgard/Morheim = Asmodian).
+- **Professions**: Herrería (Weaponsmithing), Armadura (Armorsmithing), Orfebrería (Jewelcrafting), Alquimia (Alchemy), Cocina (Cooking). Level 1–100 (Beginner 1–50, Specialist 51–100).
+- **Market**: one per server (each server = one faction). Listing fee ≈2% (paid when listing, not refunded) + sales tax ≈10% on settlement → net ≈88%. Max. ~10 active listings. Both % will be configurable (the real value is shown in the Market window).
+- **Combo**: after a success, 20–30% chance of a combo with its own curve; it gives the "Espléndida" (Splendent) version/a larger quantity. The Excel file assumes a failed combo loses everything → configurable.
+- **Game access**: there is no official market API. The anti-cheat (NCGuard) detects simulated input and NC's policy forbids reading memory, modifying the client or capturing traffic (permanent ban). The safe option is **passive screen capture + OCR**: you browse the market by hand, the app only reads images, without touching the game's process, memory or network. No automatic clicks/keys.
+- **Environment**: Python 3.14.5 at `%LOCALAPPDATA%\Programs\Python\Python314\python.exe` (not on PATH; the launcher will use that path). No Node or Git.
 
-## Enfoque: app local Python + base de datos personal en Supabase + panel web en `localhost`
+## Approach: local Python app + personal Supabase database + web dashboard on `localhost`
 
-### Arquitectura
+### Architecture
 ```
-[Juego AION 2]  ← solo se mira la pantalla, nunca se toca
-      │ (vídeo grabado / captura continua pasiva / captura suelta)
+[AION 2 game]  ← the screen is only looked at, never touched
+      │ (recorded video / continuous passive capture / single screenshot)
       ▼
-[App local Python (FastAPI)]  — OCR, emparejado con catálogo, motor de rentabilidad, panel web
-      │ HTTPS (clave guardada solo en .env local, nunca en el navegador)
+[Local Python app (FastAPI)]  — OCR, catalog matching, profitability engine, web dashboard
+      │ HTTPS (key stored only in the local .env, never in the browser)
       ▼
-[Supabase (Postgres en la nube, plan gratuito)]  — histórico de precios, cantidades, volumen estimado,
-                                                    servidores, perfiles, niveles, inventario, ventas propias
+[Supabase (cloud Postgres, free plan)]  — price history, quantities, estimated volume,
+                                          servers, profiles, levels, inventory, own sales
 ```
-- **Supabase** es la base de datos personal: el histórico queda en la nube, sobrevive a cambios de PC y permite consultarlo desde cualquier sitio (y en el futuro, ver el panel desde el móvil).
-- **Cola local**: si no hay conexión, las lecturas se guardan en `data/pendientes.jsonl` y se suben al reconectar. El catálogo de recetas vive en `data/catalogo.json` (y se sube también a Supabase para poder hacer consultas cruzadas).
-- **Configuración**: tú creas el proyecto en supabase.com y pegas la URL y la clave en `.env` (yo no introduzco claves). La app crea las tablas con un script SQL de migración (`supabase/esquema.sql`) que pegas en el editor SQL de Supabase o aplica la app.
-- Nota: el plan gratuito pausa el proyecto tras ~1 semana sin uso (se reactiva con un clic) y tiene 500 MB, de sobra para años de histórico.
+- **Supabase** is the personal database: the history stays in the cloud, survives PC changes and can be queried from anywhere (and in the future, the dashboard could be viewed from a phone).
+- **Local queue**: if there is no connection, readings are saved to `data/pendientes.jsonl` and uploaded on reconnect. The recipe catalog lives in `data/catalogo.json` (and is also uploaded to Supabase to allow cross queries).
+- **Configuration**: you create the project on supabase.com and paste the URL and key into `.env` (I don't enter keys). The app creates the tables with an SQL migration script (`supabase/esquema.sql`) that you paste into the Supabase SQL editor or the app applies.
+- Note: the free plan pauses the project after ~1 week without use (reactivated with one click) and has 500 MB, more than enough for years of history.
 
-### Estructura
+### Structure
 ```
 Life Skill Manager - Aion 2/
-  iniciar.bat               crea .venv con la ruta de Python 3.14, instala deps, arranca y abre el navegador
-  .env                      SUPABASE_URL, SUPABASE_KEY (solo local)
-  requirements.txt          fastapi, uvicorn, httpx, supabase, python-dotenv, mss, pillow, opencv-python (o imageio-ffmpeg),
-                            winrt-Windows.Media.Ocr (+deps winrt), rapidfuzz, openpyxl, pytest
-  supabase/esquema.sql      tablas, índices y vistas (precio diario, percentiles)
+  iniciar.bat               creates .venv with the Python 3.14 path, installs deps, starts the app and opens the browser
+  .env                      SUPABASE_URL, SUPABASE_KEY (local only)
+  requirements.txt          fastapi, uvicorn, httpx, supabase, python-dotenv, mss, pillow, opencv-python (or imageio-ffmpeg),
+                            winrt-Windows.Media.Ocr (+winrt deps), rapidfuzz, openpyxl, pytest
+  supabase/esquema.sql      tables, indexes and views (daily price, percentiles)
   app/
-    main.py                 FastAPI: API REST + sirve el frontend
-    db.py                   acceso a Supabase + cola local offline
-    precio_objetivo.py      precio recomendado de venta/compra a partir del histórico
-    catalogo.py             carga data/catalogo.json (objetos, recetas, curvas)
-    calculo.py              motor de rentabilidad (núcleo, con tests)
+    main.py                 FastAPI: REST API + serves the frontend
+    db.py                   Supabase access + local offline queue
+    precio_objetivo.py      recommended sell/buy price from the history
+    catalogo.py             loads data/catalogo.json (items, recipes, curves)
+    calculo.py              profitability engine (core, with tests)
     captura/
-      grabacion.py          modo grabación: captura pasiva de pantalla a 2–4 fps mientras navegas el mercado
-      video.py              importar un vídeo (OBS / Xbox Game Bar Win+Alt+R): extrae fotogramas, descarta repetidos
-      vigilante.py          vigila carpeta de capturas sueltas (Steam F12 / Impr Pant)
-      temporales.py         borrado de imágenes/vídeos tras verificar el guardado en Supabase; limpieza y tope de tamaño
-      ocr.py                Windows.Media.Ocr (es-ES), recorte/escala/umbral por región calibrada
-      parser.py             filas → (objeto por coincidencia difusa con catálogo ES, precio, cantidad)
-    static/ index.html, app.js, estilos.css   (SPA vanilla JS + Chart.js por CDN; estilo oscuro como el HTML actual)
+      grabacion.py          recording mode: passive screen capture at 2–4 fps while you browse the market
+      video.py              import a video (OBS / Xbox Game Bar Win+Alt+R): extracts frames, discards repeats
+      vigilante.py          watches a folder of loose screenshots (Steam F12 / Print Screen)
+      temporales.py         deletes images/videos after verifying the save in Supabase; cleanup and size cap
+      ocr.py                Windows.Media.Ocr (es-ES), crop/scale/threshold per calibrated region
+      parser.py             rows → (item via fuzzy match against the ES catalog, price, quantity)
+    static/ index.html, app.js, estilos.css   (vanilla JS SPA + Chart.js from a CDN; dark style like the current HTML)
   tools/
-    importar_metabot.py     descarga /es/ y /en/ de metabot, parsea el payload → data/catalogo.json
-    importar_excel.py       siembra precios del Excel (nombres EN → id) como histórico inicial del 09/10/2026
+    importar_metabot.py     downloads /es/ and /en/ from metabot, parses the payload → data/catalogo.json
+    importar_excel.py       seeds prices from the Excel file (EN names → id) as the initial history of 09/10/2026
   data/catalogo.json, data/aion2.db, capturas/
   tests/test_calculo.py, tests/test_parser.py
 ```
 
-### Datos (Supabase / Postgres)
-- `servidores` (nombre, facción, región, comisión registro %, impuesto venta %) — cada servidor tiene su mercado.
-- `perfiles` (personaje, servidor) → para jugar ambas facciones con precios separados.
-- `objetos`, `recetas`, `receta_ingredientes`, `curvas` — catálogo (copia de `catalogo.json`).
-- `lecturas_mercado` (servidor, objeto, fecha, precio_mín, cantidad total en oferta, nº anuncios, fuente: video/grabación/captura/manual/excel, id de sesión de lectura).
-- `ofertas` (lectura, precio, cantidad) — el libro de ofertas completo de cada lectura.
-- `ventas_propias` / `compras_propias` (perfil, objeto, cantidad, precio, fecha) — tus operaciones reales (desde la pestaña de liquidación), para medir tu beneficio real frente al estimado.
-- `niveles` (perfil, profesión, nivel), `inventario` (perfil, objeto, cantidad, ubicación: inventario/almacén).
-- `precios_npc` (objeto, precio) — sembrado desde metabot, editable.
-- `ajustes` (rebaja al listar, regla de combo fallido, valorar inventario a precio de mercado o a coste 0).
-- Vistas: `precio_diario` (mín/medio/percentiles por día), `volumen_estimado` (caídas de cantidad en oferta entre lecturas = unidades probablemente vendidas).
+### Data (Supabase / Postgres)
+- `servidores` (name, faction, region, listing fee %, sales tax %) — each server has its own market.
+- `perfiles` (character, server) → to play both factions with separate prices.
+- `objetos`, `recetas`, `receta_ingredientes`, `curvas` — catalog (copy of `catalogo.json`).
+- `lecturas_mercado` (server, item, date, min price, total quantity on offer, number of listings, source: video/recording/screenshot/manual/excel, reading session id).
+- `ofertas` (reading, price, quantity) — the full order book of each reading.
+- `ventas_propias` / `compras_propias` (profile, item, quantity, price, date) — your real operations (from the settlement tab), to measure your real profit against the estimate.
+- `niveles` (profile, profession, level), `inventario` (profile, item, quantity, location: inventory/warehouse).
+- `precios_npc` (item, price) — seeded from metabot, editable.
+- `ajustes` (listing undercut, failed-combo rule, value inventory at market price or at cost 0).
+- Views: `precio_diario` (min/mean/percentiles per day), `volumen_estimado` (drops in quantity on offer between readings = units probably sold).
 
-### Motor de rentabilidad (`calculo.py`)
-1. **Coste de adquisición** de cada objeto = mínimo entre: comprar en mercado (último precio, con antigüedad), tienda NPC (objetos vinculados), o **fabricarlo** con la mejor receta desbloqueada (recursivo, memoizado, con protección de ciclos). Así detecta cadenas tipo "comprar mineral → lingote → arma" vs "comprar lingote".
-2. **Probabilidades**: `p_éxito = curva[min(nivel − nivel_receta, len−1)]`; combo: `p_éxito × %combo × curva_combo`. Resultado esperado por intento = cantidad base × P(éxito sin combo) + producto combo × P(combo ok) (+ regla configurable si el combo falla).
-3. **Venta neta** = precio de venta × (1 − 2% − 10%), precio de venta = mínimo actual − rebaja configurable.
-4. **Métricas por receta**: coste/intento, ingreso esperado, beneficio/intento, margen %, precio de equilibrio, beneficio con N intentos.
-5. **Profundidad de mercado**: con el libro de ofertas capturado, calcula cuántos intentos puedes hacer comprando por tramos de precio (el coste sube al agotar las ofertas baratas) y avisa de saturación del producto (muchos anuncios) y del límite de 10 anuncios.
-6. **Inventario**: descuenta lo que ya tienes; "puedes hacer X ya, te faltan Y (coste Z)".
+### Profitability engine (`calculo.py`)
+1. **Acquisition cost** of each item = minimum of: buying on the market (latest price, with its age), NPC shop (bound items), or **crafting it** with the best unlocked recipe (recursive, memoized, with cycle protection). This way it detects chains like "buy ore → ingot → weapon" vs "buy ingot".
+2. **Probabilities**: `p_éxito = curva[min(nivel − nivel_receta, len−1)]`; combo: `p_éxito × %combo × curva_combo`. Expected result per attempt = base quantity × P(success without combo) + combo product × P(combo ok) (+ configurable rule if the combo fails).
+3. **Net sale** = sell price × (1 − 2% − 10%), sell price = current minimum − configurable undercut.
+4. **Per-recipe metrics**: cost/attempt, expected income, profit/attempt, margin %, break-even price, profit with N attempts.
+5. **Market depth**: with the captured order book, it calculates how many attempts you can make buying through price tiers (the cost rises as the cheap offers run out) and warns about product saturation (many listings) and the 10-listing limit.
+6. **Inventory**: subtracts what you already have; "you can make X now, you're missing Y (cost Z)".
 
-### Precio objetivo (`precio_objetivo.py`)
-- **Precio de venta recomendado** por objeto, usando el histórico del servidor (últimos 7/30 días):
-  - Rango "normal" = percentiles P25–P75 del precio mínimo; velocidad de venta = volumen estimado/día.
-  - Si el precio actual está dentro o por encima del rango → listar justo por debajo del más barato (rebaja configurable).
-  - Si el precio actual está anormalmente bajo (< P25, alguien está "tirando" precios) → recomendar listar en torno a la mediana y esperar, o no fabricar todavía; se muestra el aviso.
-  - Si hay muchas unidades en oferta frente a lo que se vende al día → aviso de saturación y precio más agresivo.
-  - Muestra también el tiempo estimado para vender tus unidades a ese precio.
-- **Precio de compra objetivo** de ingredientes: "compra por debajo de X" (≈P25), con alerta cuando una lectura lo cumpla.
-- El panel calcula el beneficio con dos escenarios: **vender ya** (precio actual) y **vender a precio objetivo**.
+### Target price (`precio_objetivo.py`)
+- **Recommended sell price** per item, using the server's history (last 7/30 days):
+  - "Normal" range = P25–P75 percentiles of the minimum price; sales speed = estimated volume/day.
+  - If the current price is within or above the range → list just below the cheapest listing (configurable undercut).
+  - If the current price is abnormally low (< P25, someone is "dumping" prices) → recommend listing around the median and waiting, or not crafting yet; a warning is shown.
+  - If there are many units on offer compared with daily sales → saturation warning and a more aggressive price.
+  - It also shows the estimated time to sell your units at that price.
+- **Target buy price** for ingredients: "buy below X" (≈P25), with an alert when a reading meets it.
+- The dashboard calculates profit under two scenarios: **sell now** (current price) and **sell at target price**.
 
-### Pantallas (español)
-1. **Panel** (principal): tabla "Mejores oportunidades ahora", solo recetas desbloqueadas por tu nivel. Columnas: receta, profesión, beneficio/intento, margen %, nº intentos recomendados, inversión, beneficio total esperado, antigüedad de los precios (semáforo), botón "lista de la compra". Filtros: profesión, inversión máxima, margen mínimo, incluir intermedios.
-2. **Mercado**: buscador de objetos, último precio/cantidad, gráfico histórico (precio mín. y cantidad en oferta), volumen estimado (caídas de cantidad entre capturas), entrada manual rápida.
-3. **Captura**: estado del vigilante, última imagen con las filas reconocidas para confirmar/corregir antes de guardar, calibración de la región de la lista (una vez por resolución).
-4. **Recetas**: explorador con árbol de ingredientes, cadena "comprar vs fabricar" y calculadora detallada.
-5. **Personaje**: perfiles, niveles de las 5 profesiones, inventario/almacén (edición rápida y pegado de texto "nombre: cantidad").
-6. **Ajustes**: comisiones, reglas de combo, precios NPC, importar/exportar JSON, atribución a metabot.gg.
+### Screens (Spanish)
+1. **Dashboard** (main): "Best opportunities right now" table, only recipes unlocked at your level. Columns: recipe, profession, profit/attempt, margin %, recommended attempts, investment, total expected profit, price age (traffic light), "shopping list" button. Filters: profession, maximum investment, minimum margin, include intermediates.
+2. **Market**: item search, latest price/quantity, history chart (min price and quantity on offer), estimated volume (drops in quantity between captures), quick manual entry.
+3. **Capture**: watcher status, latest image with the recognized rows to confirm/correct before saving, calibration of the list region (once per resolution).
+4. **Recipes**: explorer with ingredient tree, "buy vs craft" chain and detailed calculator.
+5. **Character**: profiles, levels of the 5 professions, inventory/warehouse (quick editing and pasting "name: quantity" text).
+6. **Settings**: fees, combo rules, NPC prices, JSON import/export, attribution to metabot.gg.
 
-### Lectura de precios del juego (solo lectura, sin tocar el juego)
-Tú navegas el mercado con tu ratón y teclado; la app **solo mira la pantalla**. Tres formas, de más a menos cómoda:
-1. **Modo grabación (recomendado)**: pulsas "Empezar lectura" en la app, recorres las pestañas/categorías del mercado a tu ritmo y pulsas "Terminar". La app captura la pantalla 2–4 veces por segundo, descarta fotogramas repetidos, hace OCR de cada pantalla distinta y junta todo en una sesión de lectura (un recorrido completo ≈ unos minutos).
-2. **Importar vídeo**: grabas con OBS o la Xbox Game Bar (Win+Alt+R) mientras recorres el mercado y arrastras el vídeo a la app; hace lo mismo con los fotogramas del vídeo.
-3. **Captura suelta**: F12 de Steam / Impr Pant para un objeto concreto.
-En todos los casos: recorte de la zona calibrada → OCR de Windows en español → emparejado del nombre con el catálogo (coincidencia difusa) → precios/cantidades. Pantalla de revisión con las filas dudosas resaltadas antes de guardar en Supabase.
-- Requisito una vez: instalar el paquete de OCR en español de Windows (comando de administrador que te daré; `Get-WindowsCapability ... Language.OCR~~~es-ES`). Los números son lo crítico y el OCR en inglés también sirve para ellos.
-- Alternativa de respaldo: dejar capturas en `capturas/pendientes` y pedirme en Claude Code que las lea (yo veo imágenes) y las cargue.
-- **Sin acumulación de imágenes** (`captura/temporales.py`):
-  - Modo grabación: los fotogramas se procesan **en memoria** y nunca se escriben en disco; solo se guarda en `capturas/tmp/` el recorte pequeño de una fila dudosa mientras esperas para revisarla.
-  - Vídeos y capturas sueltas: se procesan, se guardan las lecturas en Supabase, la app **vuelve a leer esas filas de Supabase para verificar** que están completas y solo entonces borra el archivo. Si la subida falla, el archivo se conserva hasta el siguiente intento correcto (sin conexión los datos van a la cola local; el archivo se borra cuando la cola se haya subido y verificado).
-  - Al arrancar, la app limpia los temporales huérfanos ya verificados y aplica un tope de tamaño de `capturas/tmp/` (p.ej. 500 MB), avisando si se supera.
-  - En Supabase solo se guardan números y nombres, nunca imágenes.
-- **Por qué no te propongo que yo (o la app) controle el juego directamente**: para recorrer las pestañas habría que enviar clics/teclas simuladas al juego. El anticheat de AION 2 (NCGuard) detecta la entrada virtual y el EULA prohíbe el acceso automatizado; NC banea de forma permanente la cuenta (en todos sus juegos). Por eso la navegación la haces tú y la automatización empieza en la imagen. Fuera de alcance también: leer memoria, capturar tráfico de red o modificar el cliente.
+### Reading prices from the game (read-only, without touching the game)
+You browse the market with your mouse and keyboard; the app **only looks at the screen**. Three ways, from most to least convenient:
+1. **Recording mode (recommended)**: you press "Empezar lectura" (Start reading) in the app, go through the market tabs/categories at your own pace and press "Terminar" (Finish). The app captures the screen 2–4 times per second, discards repeated frames, runs OCR on each distinct screen and merges everything into one reading session (a full pass ≈ a few minutes).
+2. **Import video**: you record with OBS or the Xbox Game Bar (Win+Alt+R) while browsing the market and drag the video into the app; it does the same with the video's frames.
+3. **Single screenshot**: Steam F12 / Print Screen for a specific item.
+In every case: crop of the calibrated area → Windows OCR in Spanish → matching the name against the catalog (fuzzy match) → prices/quantities. A review screen highlights doubtful rows before saving to Supabase.
+- One-time requirement: install the Windows Spanish OCR package (an administrator command I will give you; `Get-WindowsCapability ... Language.OCR~~~es-ES`). Numbers are what matters most and the English OCR also works for them.
+- Fallback alternative: leave screenshots in `capturas/pendientes` and ask me in Claude Code to read them (I can see images) and load them.
+- **No image buildup** (`captura/temporales.py`):
+  - Recording mode: frames are processed **in memory** and never written to disk; only the small crop of a doubtful row is saved in `capturas/tmp/` while it waits for your review.
+  - Videos and single screenshots: they are processed, the readings are saved to Supabase, the app **reads those rows back from Supabase to verify** they are complete and only then deletes the file. If the upload fails, the file is kept until the next successful attempt (without a connection the data goes to the local queue; the file is deleted once the queue has been uploaded and verified).
+  - On startup, the app cleans up orphaned temporary files that are already verified and applies a size cap to `capturas/tmp/` (e.g. 500 MB), warning if it is exceeded.
+  - Only numbers and names are stored in Supabase, never images.
+- **Why I don't suggest that I (or the app) control the game directly**: going through the tabs would require sending simulated clicks/keys to the game. AION 2's anti-cheat (NCGuard) detects virtual input and the EULA forbids automated access; NC permanently bans the account (across all its games). That is why you do the browsing and the automation starts at the image. Also out of scope: reading memory, capturing network traffic or modifying the client.
 
-## Fases de implementación
-1. **Catálogo**: `tools/importar_metabot.py` → `catalogo.json` (512 recetas, nombres ES/EN, curvas, facción, precios NPC de vinculados, comerciable sí/no). Verificar mapeo de facción y producto de combo inspeccionando el payload real.
-2. **Supabase + motor**: `esquema.sql`, `db.py` (con cola offline), `calculo.py` con tests que reproduzcan las cifras del Excel (p.ej. Okra frita: coste 8.864, equilibrio ≈8.899 con las mismas probabilidades). Necesita que crees el proyecto en Supabase y rellenes `.env`.
-3. **API + panel web** (Panel, Recetas, Personaje, Mercado con entrada manual, Ajustes). Siembra de precios del Excel.
-4. **Lectura del mercado**: captura suelta → modo grabación → importar vídeo; calibración, revisión y guardado.
-5. **Precio objetivo + pulido**: percentiles, volumen estimado, escenarios vender ya / a precio objetivo, gráficos, lista de la compra, alertas, `iniciar.bat`.
+## Implementation phases
+1. **Catalog**: `tools/importar_metabot.py` → `catalogo.json` (512 recipes, ES/EN names, curves, faction, NPC prices of bound items, tradeable yes/no). Verify the faction mapping and the combo product by inspecting the real payload.
+2. **Supabase + engine**: `esquema.sql`, `db.py` (with offline queue), `calculo.py` with tests that reproduce the Excel figures (e.g. Okra frita: cost 8,864, break-even ≈8,899 with the same probabilities). Requires you to create the Supabase project and fill in `.env`.
+3. **API + web dashboard** (Dashboard, Recipes, Character, Market with manual entry, Settings). Seeding prices from the Excel file.
+4. **Market reading**: single screenshot → recording mode → video import; calibration, review and saving.
+5. **Target price + polish**: percentiles, estimated volume, sell now / at target price scenarios, charts, shopping list, alerts, `iniciar.bat`.
 
-## Verificación
-- `pytest`: motor de cálculo contra los valores del Excel; curvas/combos con casos conocidos de metabot; parser OCR con capturas de ejemplo; precio objetivo con históricos sintéticos (normal, precio hundido, saturación).
-- Supabase: insertar una sesión de lectura, cortar la conexión y comprobar que la cola local se sube al reconectar.
-- Temporales: tras procesar un vídeo y una captura, comprobar que los archivos desaparecen solo después de verificar las filas en Supabase, y que con la conexión cortada se conservan hasta la subida.
-- Arrancar con `iniciar.bat`, abrir `http://localhost:8000` en el navegador integrado y comprobar: nombres en español, recetas filtradas por facción y nivel, panel ordenado por beneficio, histórico tras introducir precios.
-- OCR: con tu primera grabación/vídeo real del Mercado, comparar valores leídos vs pantalla y ajustar recortes y deduplicado; si fallan muchas, recalibrar.
-- Revisar con algunas recetas en el juego (nivel requerido, ingredientes) las que metabot marque dudosas.
+## Verification
+- `pytest`: calculation engine against the Excel values; curves/combos with known metabot cases; OCR parser with sample screenshots; target price with synthetic histories (normal, crashed price, saturation).
+- Supabase: insert a reading session, cut the connection and check that the local queue uploads on reconnect.
+- Temporary files: after processing a video and a screenshot, check that the files disappear only after the rows are verified in Supabase, and that with the connection cut they are kept until the upload.
+- Start with `iniciar.bat`, open `http://localhost:8000` in the built-in browser and check: Spanish names, recipes filtered by faction and level, dashboard sorted by profit, history after entering prices.
+- OCR: with your first real recording/video of the Market, compare read values vs the screen and adjust crops and deduplication; if many fail, recalibrate.
+- Check in the game (required level, ingredients) a few of the recipes that metabot marks as doubtful.

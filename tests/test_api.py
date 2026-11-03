@@ -1,4 +1,4 @@
-"""API tests (app/main.py + app/servicios.py) with test doubles: tiny catalog, in-memory repo,
+"""API tests (app/main.py + app/servicios.py) with doubles: mini catalog, in-memory repo,
 fake engine and fake target price. At the end, smoke tests with the real modules if they exist."""
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ import app.servicios as servicios
 from app.servicios import Servicios, campo
 
 # ---------------------------------------------------------------------------
-# test doubles
+# doubles
 # ---------------------------------------------------------------------------
 CAT_MINI = {
     "fuente": "test", "version_cliente": "0.0.0", "generado": "2026-11-02T12:00:00Z",
@@ -358,7 +358,7 @@ def test_oportunidades_y_recetas(entorno):
     precio(c, s["id"], 3, 2000)
     r = c.get("/api/oportunidades", params={"perfil_id": "blas"}).json()
     nombres = [f["nombre"] for f in r["filas"]]
-    assert nombres == ["Espada de orichalcum", "Lingote de orichalcum"]  # Asmodian cooking excluded
+    assert nombres == ["Espada de orichalcum", "Lingote de orichalcum"]  # asmodian cooking excluded
     top = r["filas"][0]
     assert top["profesion_nombre"] == "Herrería" and top["intentos_recomendados"] == 10
     assert top["semaforo"] == "verde" and top["inversion"] == pytest.approx(12000)
@@ -366,7 +366,7 @@ def test_oportunidades_y_recetas(entorno):
     assert esc["estado"] == "hundido" and esc["precio_objetivo"] == pytest.approx(2200)
     assert esc["beneficio_total"] > top["beneficio_total"]
 
-    # margins: sword ≈ 46.6%, ingot ≈ 40.4%
+    # margins: sword ≈ 46.6 %, ingot ≈ 40.4 %
     filtrado = c.get("/api/oportunidades", params={"perfil_id": "blas", "margen_min": 42}).json()
     assert [f["nombre"] for f in filtrado["filas"]] == ["Espada de orichalcum"]
 
@@ -396,7 +396,7 @@ def test_motor_ausente_degrada_con_503(entorno, monkeypatch, tmp_path):
         preparar_perfil(c)
         r = c.get("/api/oportunidades", params={"perfil_id": "blas"})
         assert r.status_code == 503 and "app/calculo.py" in r.json()["detail"]
-        # everything else keeps working
+        # the rest keeps working
         assert c.get("/api/recetas").status_code == 200
         assert c.get("/").status_code == 200
         det = c.get("/api/recetas/101").json()
@@ -426,7 +426,7 @@ def test_ajustes_y_npc(entorno):
     c.put("/api/precios-npc", json={"objeto_id": 4, "precio": 70})
     npc = c.get("/api/precios-npc").json()
     assert npc[0]["precio"] == 70 and npc[0]["origen"] == "manual"
-    # a server's own fee overrides the global one
+    # a server with its own fee overrides the global one
     s = c.post("/api/servidores", json={"nombre": "Zikel", "faccion": "asmodian", "comision_registro": 0.05}).json()
     assert entorno.serv.ajustes_efectivos(s)["comision_registro"] == 0.05
 
@@ -469,7 +469,7 @@ def test_captura_imagen_revision_y_limpieza(entorno):
     assert lect[1].fuente == "captura" and lect[2].precio_min == 900
     assert not list((entorno.tmp / "tmp").glob("*mercado.png"))  # deleted after verification
     assert c.post(f"/api/captura/sesiones/{ses['id']}/guardar").status_code == 400
-    # sessions are kept on disk
+    # sessions are persisted on disk
     assert (entorno.tmp / "sesiones.json").exists()
 
 
@@ -503,7 +503,7 @@ def test_operaciones(entorno):
 
 
 # ---------------------------------------------------------------------------
-# smoke tests with the real modules (if they exist)
+# smoke tests with the real modules (if they already exist)
 # ---------------------------------------------------------------------------
 def _hay(modulo):
     try:
@@ -513,7 +513,7 @@ def _hay(modulo):
         return False
 
 
-@pytest.mark.skipif(not (_hay("app.calculo") and _hay("app.precio_objetivo")), reason="motor real aún no disponible")
+@pytest.mark.skipif(not (_hay("app.calculo") and _hay("app.precio_objetivo")), reason="real engine not available yet")
 def test_humo_motor_real(tmp_path):
     import app.calculo as calculo
     import app.precio_objetivo as po
@@ -540,7 +540,7 @@ def test_humo_motor_real(tmp_path):
         assert d["objetivo_venta"]["estado"] == "sin_datos"
 
 
-@pytest.mark.skipif(not _hay("app.db"), reason="app/db.py aún no disponible")
+@pytest.mark.skipif(not _hay("app.db"), reason="app/db.py not available yet")
 def test_humo_repositorio_local_real(tmp_path):
     from app.db import RepositorioLocal
 

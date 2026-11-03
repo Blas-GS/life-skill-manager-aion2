@@ -1,17 +1,17 @@
-"""Capa de datos: Supabase (PostgREST vía httpx) o SQLite local.
+"""Data layer: Supabase (PostgREST via httpx) or local SQLite.
 
-Uso:
-    repo = obtener_repositorio()   # Supabase si .env tiene SUPABASE_URL y SUPABASE_KEY; si no, SQLite
+Usage:
+    repo = obtener_repositorio()   # Supabase if .env has SUPABASE_URL and SUPABASE_KEY; otherwise SQLite
     repo.backend                   # "supabase" | "local"
 
-Contrato completo en docs/contratos.md (sección 2).
+Full contract in docs/contratos.md (section 2).
 
-Cola offline (solo Supabase): si guardar_lecturas no puede escribir en Supabase,
-las lecturas se guardan en data/pendientes.jsonl (una línea por lote) y
-subir_pendientes() las reintenta. Los ids (uuid) se generan aquí, antes de
-subir, así que las subidas repetidas son idempotentes y verificar_lecturas()
-puede preguntar por ellos aunque sigan en la cola (devuelve False hasta que
-estén en la base de datos con todas sus ofertas).
+Offline queue (Supabase only): if guardar_lecturas cannot write to Supabase,
+the readings are saved to data/pendientes.jsonl (one line per batch) and
+subir_pendientes() retries them. The ids (uuid) are generated here, before
+uploading, so repeated uploads are idempotent and verificar_lecturas()
+can ask about them even while they are still queued (it returns False until
+they are in the database with all their offers).
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ _COLS_OPERACION = ("id", "perfil_id", "tipo", "objeto_id", "cantidad", "precio",
 
 
 # ---------------------------------------------------------------------------
-# Tipos públicos
+# Public types
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -70,30 +70,30 @@ class Lectura:
     objeto_id: int
     fecha: datetime                   # UTC
     precio_min: float | None
-    cantidad_total: int | None        # unidades en oferta
+    cantidad_total: int | None        # units on offer
     num_anuncios: int | None
-    ofertas: list[tuple[float, int]]  # [(precio, cantidad)] ordenado por precio
+    ofertas: list[tuple[float, int]]  # [(precio, cantidad)] sorted by price
     fuente: str                       # "grabacion" | "video" | "captura" | "manual" | "excel"
-    id: str | None = None             # uuid asignado al guardar
+    id: str | None = None             # uuid assigned on save
 
 
 @dataclass
 class ResultadoGuardado:
     ids: list[str]
-    en_cola: bool                     # True si quedó en la cola offline
-    error: str | None = None          # motivo, si quedó en cola
+    en_cola: bool                     # True if it ended up in the offline queue
+    error: str | None = None          # reason, if it was queued
 
 
 class ErrorBaseDatos(RuntimeError):
-    """La base de datos rechazó la operación."""
+    """The database rejected the operation."""
 
 
 class ErrorRed(ErrorBaseDatos):
-    """No se pudo contactar con Supabase (sin red, caído, pausado o saturado)."""
+    """Could not reach Supabase (no network, down, paused or overloaded)."""
 
 
 # ---------------------------------------------------------------------------
-# Utilidades
+# Utilities
 # ---------------------------------------------------------------------------
 
 def _utc(fecha: datetime | str) -> datetime:
@@ -105,7 +105,7 @@ def _utc(fecha: datetime | str) -> datetime:
 
 
 def _iso(fecha: datetime | str) -> str:
-    # Formato fijo: en SQLite el orden de texto coincide con el cronológico.
+    # Fixed format: in SQLite the text order matches the chronological order.
     return _utc(fecha).isoformat(timespec="microseconds")
 
 
@@ -167,13 +167,13 @@ def _candado(ruta: Path) -> threading.Lock:
 
 
 # ---------------------------------------------------------------------------
-# Lógica común a los dos backends
+# Logic shared by both backends
 # ---------------------------------------------------------------------------
 
 class _RepositorioBase:
     backend = ""
 
-    # --- validación / normalización -------------------------------------
+    # --- validation / normalization -------------------------------------
     @staticmethod
     def _normalizar_servidor(datos: dict) -> dict:
         fila = {k: datos[k] for k in _COLS_SERVIDOR if k in datos}
@@ -193,11 +193,11 @@ class _RepositorioBase:
     @staticmethod
     def _preparar_lecturas(lecturas: list[Lectura], sesion_id: str | None
                            ) -> tuple[list[dict], list[dict], list[str]]:
-        """Valida, asigna ids y ordena ofertas. Devuelve (filas, ofertas, ids)."""
+        """Validates, assigns ids and sorts offers. Returns (filas, ofertas, ids)."""
         filas, ofertas, ids = [], [], []
         for lec in lecturas:
             if not isinstance(lec, Lectura):
-                raise TypeError("guardar_lecturas espera objetos Lectura")
+                raise TypeError("guardar_lecturas expects Lectura objects")
             if not lec.servidor_id:
                 raise ValueError("Lectura sin servidor_id")
             if lec.fuente not in FUENTES:
@@ -278,7 +278,7 @@ class _RepositorioBase:
             total[int(f["objeto_id"])] = total.get(int(f["objeto_id"]), 0) + int(f["cantidad"])
         return {k: v for k, v in total.items() if v > 0}
 
-    # --- por defecto (los sobrescribe Supabase) ---------------------------
+    # --- defaults (overridden by Supabase) --------------------------------
     def subir_pendientes(self) -> int:
         return 0
 
@@ -359,7 +359,7 @@ create table if not exists operaciones (
 create index if not exists operaciones_perfil_fecha on operaciones (perfil_id, fecha desc);
 create table if not exists ajustes (clave text primary key, valor text, actualizado text);
 
--- En SQLite no hay percentile_cont: p25/mediana/p75 solo existen en Supabase.
+-- SQLite has no percentile_cont: p25/mediana/p75 only exist in Supabase.
 create view if not exists precio_diario as
 select servidor_id, objeto_id, substr(fecha, 1, 10) as dia,
        min(precio_min) as precio_min, avg(precio_min) as precio_medio,
@@ -398,7 +398,7 @@ class RepositorioLocal(_RepositorioBase):
         con.row_factory = sqlite3.Row
         con.execute("pragma foreign_keys = on")
         try:
-            with con:  # commit al salir bien, rollback si hay excepción
+            with con:  # commit on clean exit, rollback on exception
                 yield con
         except sqlite3.Error as e:
             raise ErrorBaseDatos(f"Error en la base de datos local: {e}") from e
@@ -419,14 +419,14 @@ class RepositorioLocal(_RepositorioBase):
             f"on conflict ({', '.join(clave)}) {accion}",
             [fila[c] for c in cols])
 
-    # --- servidores / perfiles ---------------------------------------------
+    # --- servers / profiles ------------------------------------------------
     def listar_servidores(self) -> list[dict]:
         return self._filas(f"select {', '.join(_COLS_SERVIDOR)} from servidores order by nombre")
 
     def _guardar_por_id(self, tabla: str, cols: tuple[str, ...], fila: dict) -> dict:
         sql = f"select {', '.join(cols)} from {tabla} where id = ?"
         actual = self._filas(sql, [fila["id"]])
-        fila = {**(actual[0] if actual else {}), **fila}  # actualizar solo lo indicado
+        fila = {**(actual[0] if actual else {}), **fila}  # update only the given fields
         with self._con() as con:
             self._upsert(con, tabla, fila, ("id",))
         return self._filas(sql, [fila["id"]])[0]
@@ -469,7 +469,7 @@ class RepositorioLocal(_RepositorioBase):
                     "cantidad": int(cantidad), "actualizado": _ahora()},
                     ("perfil_id", "objeto_id", "ubicacion"))
 
-    # --- mercado -------------------------------------------------------------
+    # --- market --------------------------------------------------------------
     def guardar_lecturas(self, lecturas: list[Lectura], sesion_id: str | None = None
                          ) -> ResultadoGuardado:
         filas, ofertas, ids = self._preparar_lecturas(lecturas, sesion_id)
@@ -528,7 +528,7 @@ class RepositorioLocal(_RepositorioBase):
             return [_lectura_de_fila(f, []) for f in filas]
         return self._a_lecturas(filas)
 
-    # --- otros -----------------------------------------------------------------
+    # --- other -----------------------------------------------------------------
     def precios_npc(self) -> dict[int, float]:
         return {int(f["objeto_id"]): float(f["precio"])
                 for f in self._filas("select objeto_id, precio from precios_npc")}
@@ -571,7 +571,7 @@ class RepositorioLocal(_RepositorioBase):
         return self._filas(sql + " order by fecha", params)
 
     def sincronizar_catalogo(self, datos: dict) -> dict[str, int]:
-        """Copia data/catalogo.json (ya cargado como dict) a las tablas del catálogo."""
+        """Copies data/catalogo.json (already loaded as a dict) to the catalog tables."""
         tablas = self._filas_catalogo(datos)
         with self._con() as con:
             for f in tablas["objetos"]:
@@ -594,9 +594,9 @@ class RepositorioLocal(_RepositorioBase):
 
 class RepositorioSupabase(_RepositorioBase):
     backend = "supabase"
-    TAM_PAGINA = 1000   # máximo por defecto de filas por respuesta en Supabase
-    TAM_LOTE = 500      # filas por POST
-    TAM_IN = 50         # ids por filtro in.(...)
+    TAM_PAGINA = 1000   # Supabase's default maximum rows per response
+    TAM_LOTE = 500      # rows per POST
+    TAM_IN = 50         # ids per in.(...) filter
 
     def __init__(self, url: str, clave: str, ruta_cola: str | Path | None = None,
                  transport: httpx.BaseTransport | None = None, timeout: float = 15.0):
@@ -610,20 +610,20 @@ class RepositorioSupabase(_RepositorioBase):
         if not clave:
             raise ValueError("Falta SUPABASE_KEY")
         cabeceras = {"apikey": clave, "Accept": "application/json"}
-        # Las claves antiguas (anon / service_role) son JWT y van también en Authorization.
-        # Las nuevas (sb_secret_... / sb_publishable_...) no son JWT: solo en apikey.
+        # Legacy keys (anon / service_role) are JWTs and also go in Authorization.
+        # The new ones (sb_secret_... / sb_publishable_...) are not JWTs: apikey only.
         if clave.startswith("eyJ"):
             cabeceras["Authorization"] = f"Bearer {clave}"
         if clave.startswith("sb_publishable_"):
-            log.warning("SUPABASE_KEY es la clave pública: con el RLS del esquema no podrá leer "
-                        "ni escribir. Usa la clave secreta (ver docs/supabase.md).")
+            log.warning("SUPABASE_KEY is the publishable key: with the schema's RLS it cannot read "
+                        "or write. Use the secret key (see docs/supabase.md).")
         self.url = url
         self._http = httpx.Client(base_url=url + "/rest/v1", headers=cabeceras,
                                   timeout=httpx.Timeout(timeout, connect=5.0), transport=transport)
         self.ruta_cola = Path(ruta_cola) if ruta_cola else RUTA_DATOS / "pendientes.jsonl"
         self._candado = _candado(self.ruta_cola)
 
-    def __repr__(self) -> str:  # nunca mostrar la clave
+    def __repr__(self) -> str:  # never show the key
         return f"RepositorioSupabase({self.url!r})"
 
     def cerrar(self) -> None:
@@ -679,13 +679,13 @@ class RepositorioSupabase(_RepositorioBase):
     def _en(ids: list[str]) -> str:
         return "in.(" + ",".join(ids) + ")"
 
-    # --- servidores / perfiles ---------------------------------------------
+    # --- servers / profiles ------------------------------------------------
     def listar_servidores(self) -> list[dict]:
         return self._get("servidores", [("select", ",".join(_COLS_SERVIDOR)), ("order", "nombre")])
 
     def _guardar_por_id(self, tabla: str, cols: tuple[str, ...], fila: dict) -> dict:
-        # Postgres comprueba NOT NULL antes del ON CONFLICT: mezclar con lo existente
-        # para poder actualizar solo algunos campos.
+        # Postgres checks NOT NULL before ON CONFLICT: merge with the existing row
+        # so that only some fields can be updated.
         actual = self._get(tabla, [("select", ",".join(cols)), ("id", f"eq.{fila['id']}")])
         fila = {**(actual[0] if actual else {}), **fila}
         res = self._insertar(tabla, [fila], "id", devolver=True)
@@ -730,9 +730,9 @@ class RepositorioSupabase(_RepositorioBase):
                 "cantidad": int(cantidad), "actualizado": _ahora()}],
                 "perfil_id,objeto_id,ubicacion")
 
-    # --- mercado -------------------------------------------------------------
+    # --- market --------------------------------------------------------------
     def _subir_lecturas(self, filas: list[dict], ofertas: list[dict]) -> None:
-        # Idempotente: reintentar un lote ya subido (entero o a medias) no duplica nada.
+        # Idempotent: retrying a batch already uploaded (fully or partly) duplicates nothing.
         self._insertar("lecturas_mercado", filas, "id", duplicados="ignore")
         if ofertas:
             self._insertar("ofertas", ofertas, "lectura_id,posicion", duplicados="ignore")
@@ -745,23 +745,23 @@ class RepositorioSupabase(_RepositorioBase):
         try:
             self._subir_lecturas(filas, ofertas)
         except ErrorBaseDatos as e:
-            # Sin red, o Supabase lo rechazó: nunca perder datos (pueden venir de una
-            # grabación que solo estaba en memoria). Se reintenta con subir_pendientes().
-            log.warning("Lecturas guardadas en la cola local: %s", e)
+            # No network, or Supabase rejected it: never lose data (it may come from a
+            # recording that only existed in memory). Retried with subir_pendientes().
+            log.warning("Readings saved to the local queue: %s", e)
             self._encolar({"tipo": "lecturas", "filas": filas, "ofertas": ofertas, "error": str(e)})
             return ResultadoGuardado(ids=ids, en_cola=True, error=str(e))
         if self.num_pendientes():
             try:
-                self.subir_pendientes()  # hay red: aprovechar para vaciar la cola
-            except Exception as e:  # noqa: BLE001 - nunca romper el guardado por esto
-                log.warning("No se pudo vaciar la cola: %s", e)
+                self.subir_pendientes()  # network is up: take the chance to drain the queue
+            except Exception as e:  # noqa: BLE001 - never break the save because of this
+                log.warning("Could not drain the queue: %s", e)
         return ResultadoGuardado(ids=ids, en_cola=False)
 
     def verificar_lecturas(self, ids: list[str]) -> bool:
-        """True solo si todas las lecturas están en Supabase con todas sus ofertas.
+        """True only if all readings are in Supabase with all their offers.
 
-        Devuelve False (no lanza) si alguna sigue en la cola o si no hay conexión:
-        ante la duda, no se borran los archivos temporales.
+        Returns False (does not raise) if any is still queued or there is no connection:
+        when in doubt, temporary files are not deleted.
         """
         ids = list(dict.fromkeys(str(i) for i in ids))
         if not ids:
@@ -784,7 +784,7 @@ class RepositorioSupabase(_RepositorioBase):
                     if i not in esperadas or reales.get(i, 0) != esperadas[i]:
                         return False
         except ErrorBaseDatos as e:
-            log.warning("No se pudieron verificar las lecturas: %s", e)
+            log.warning("Could not verify the readings: %s", e)
             return False
         return True
 
@@ -815,7 +815,7 @@ class RepositorioSupabase(_RepositorioBase):
             return [_lectura_de_fila(f, []) for f in filas]
         return self._a_lecturas(filas)
 
-    # --- cola offline ----------------------------------------------------------
+    # --- offline queue ---------------------------------------------------------
     def _leer_cola(self) -> list[dict]:
         if not self.ruta_cola.exists():
             return []
@@ -826,7 +826,7 @@ class RepositorioSupabase(_RepositorioBase):
             try:
                 entradas.append(json.loads(linea))
             except json.JSONDecodeError:
-                # Línea a medio escribir (p.ej. corte de luz): se conserva tal cual.
+                # Half-written line (e.g. power cut): kept as is.
                 entradas.append({"cola_id": "corrupta-" + hashlib.sha1(linea.encode()).hexdigest(),
                                  "tipo": "corrupta", "texto": linea})
         return entradas
@@ -859,12 +859,12 @@ class RepositorioSupabase(_RepositorioBase):
         return {f["id"] for e in entradas if e.get("tipo") == "lecturas" for f in e["filas"]}
 
     def num_pendientes(self) -> int:
-        """Nº de lecturas/operaciones esperando en la cola local."""
+        """Number of readings/operations waiting in the local queue."""
         with self._candado:
             return sum(len(e.get("filas", [])) for e in self._leer_cola())
 
     def pendientes(self) -> list[dict]:
-        """Resumen de la cola (para mostrar en el panel)."""
+        """Queue summary (to show in the dashboard)."""
         with self._candado:
             return [{"cola_id": e["cola_id"], "tipo": e.get("tipo"),
                      "filas": len(e.get("filas", [])), "encolado": e.get("encolado"),
@@ -880,10 +880,10 @@ class RepositorioSupabase(_RepositorioBase):
             raise ErrorBaseDatos("Entrada de la cola ilegible; se conserva en pendientes.jsonl")
 
     def subir_pendientes(self) -> int:
-        """Sube la cola offline. Devuelve el nº de lecturas/operaciones subidas.
+        """Uploads the offline queue. Returns the number of readings/operations uploaded.
 
-        Si se corta la red a mitad, para y deja el resto. Si Supabase rechaza una
-        entrada (p.ej. servidor inexistente), la conserva con el error y sigue.
+        If the network drops midway, it stops and leaves the rest. If Supabase rejects an
+        entry (e.g. a nonexistent server), it keeps it with the error and moves on.
         """
         with self._candado:
             entradas = self._leer_cola()
@@ -903,7 +903,7 @@ class RepositorioSupabase(_RepositorioBase):
             subidas += len(e.get("filas", []))
         if hechas or errores:
             with self._candado:
-                # Releer: otro hilo pudo añadir entradas mientras subíamos.
+                # Re-read: another thread may have added entries while we were uploading.
                 restantes = [e for e in self._leer_cola() if e["cola_id"] not in hechas]
                 for e in restantes:
                     if e["cola_id"] in errores and e.get("tipo") != "corrupta":
@@ -912,7 +912,7 @@ class RepositorioSupabase(_RepositorioBase):
                 self._escribir_cola(restantes)
         return subidas
 
-    # --- otros -----------------------------------------------------------------
+    # --- other -----------------------------------------------------------------
     def precios_npc(self) -> dict[int, float]:
         return {int(f["objeto_id"]): float(f["precio"]) for f in self._get(
             "precios_npc", [("select", "objeto_id,precio"), ("order", "objeto_id")])}
@@ -936,7 +936,7 @@ class RepositorioSupabase(_RepositorioBase):
             self._insertar("ajustes", filas, "clave")
 
     def registrar_operacion(self, perfil_id, tipo, objeto_id, cantidad, precio, fecha=None) -> dict:
-        """Guarda una venta/compra propia (precio por unidad). Sin red, va a la cola."""
+        """Saves one of your own sales/purchases (price per unit). Without network, it is queued."""
         fila = self._fila_operacion(perfil_id, tipo, objeto_id, cantidad, precio, fecha)
         try:
             self._insertar("operaciones", [fila], "id", duplicados="ignore")
@@ -954,7 +954,7 @@ class RepositorioSupabase(_RepositorioBase):
         return self._get("operaciones", params)
 
     def sincronizar_catalogo(self, datos: dict) -> dict[str, int]:
-        """Copia data/catalogo.json (ya cargado como dict) a las tablas del catálogo."""
+        """Copies data/catalogo.json (already loaded as a dict) to the catalog tables."""
         tablas = self._filas_catalogo(datos)
         self._insertar("objetos", tablas["objetos"], "id")
         self._insertar("curvas", tablas["curvas"], "id")
@@ -965,14 +965,14 @@ class RepositorioSupabase(_RepositorioBase):
 
 
 # ---------------------------------------------------------------------------
-# Elección de backend
+# Backend selection
 # ---------------------------------------------------------------------------
 
 def obtener_repositorio(backend: str | None = None, ruta_env: str | Path | None = None,
                         ruta_datos: str | Path | None = None,
                         transport: httpx.BaseTransport | None = None):
-    """Devuelve RepositorioSupabase si hay SUPABASE_URL y SUPABASE_KEY (variables de
-    entorno o .env); si no, RepositorioLocal. `backend` fuerza "local" o "supabase"."""
+    """Returns RepositorioSupabase if SUPABASE_URL and SUPABASE_KEY are set (environment
+    variables or .env); otherwise RepositorioLocal. `backend` forces "local" or "supabase"."""
     ruta_env = Path(ruta_env) if ruta_env else RUTA_ENV
     datos = Path(ruta_datos) if ruta_datos else RUTA_DATOS
     valores = dotenv_values(ruta_env) if ruta_env.exists() else {}

@@ -1,14 +1,14 @@
-"""OCR de Windows (Windows.Media.Ocr vía winrt) sobre imágenes PIL.
+"""Windows OCR (Windows.Media.Ocr via winrt) on PIL images.
 
-Solo trabaja con imágenes ya capturadas: no toca el proceso del juego,
-ni su memoria, ni su red, ni envía entrada alguna.
+It only works with already captured images: it doesn't touch the game process,
+its memory or its network, and it sends no input at all.
 
-Uso:
+Usage:
     lineas = leer_imagen(img, region=(x, y, w, h))
     # -> [{"texto", "x", "y", "w", "h", "palabras": [{"texto", "x", "y", "w", "h"}]}]
 
-Las coordenadas devueltas están SIEMPRE en el sistema de la imagen original
-(sin escalar y con el desplazamiento de la región ya sumado).
+The returned coordinates are ALWAYS in the original image's coordinate system
+(unscaled and with the region offset already added).
 """
 from __future__ import annotations
 
@@ -24,12 +24,12 @@ LineaOCR = dict[str, Any]
 IDIOMA_RESPALDO = "en-US"
 
 # --------------------------------------------------------------------------
-# Bucle asíncrono propio para winrt
+# Dedicated async loop for winrt
 # --------------------------------------------------------------------------
-# recognize_async devuelve una operación de WinRT que se espera con `await`.
-# Usar asyncio.run() en cada llamada falla si quien llama ya tiene un bucle en
-# marcha (p.ej. un endpoint async de FastAPI). Por eso todas las llamadas se
-# ejecutan en un único hilo con su propio bucle, seguro para varios hilos.
+# recognize_async returns a WinRT operation that is awaited with `await`.
+# Using asyncio.run() on each call fails if the caller already has a running
+# loop (e.g. an async FastAPI endpoint). That is why all calls run in a single
+# thread with its own loop, which is thread-safe.
 
 _bucle: asyncio.AbstractEventLoop | None = None
 _bucle_lock = threading.Lock()
@@ -52,7 +52,7 @@ def _ejecutar(coro, timeout: float = 30.0):
 
 
 # --------------------------------------------------------------------------
-# Motores OCR
+# OCR engines
 # --------------------------------------------------------------------------
 _motores: dict[str, Any] = {}
 _motores_lock = threading.Lock()
@@ -66,7 +66,7 @@ def idiomas_disponibles() -> list[str]:
 
 
 def _motor(idioma: str):
-    """Devuelve un OcrEngine para `idioma`, con respaldo en-US y luego el del perfil."""
+    """Returns an OcrEngine for `idioma`, falling back to en-US and then the profile language."""
     from winrt.windows.globalization import Language
     from winrt.windows.media.ocr import OcrEngine
 
@@ -110,7 +110,7 @@ def _a_software_bitmap(img: Image.Image):
 
 
 # --------------------------------------------------------------------------
-# Preprocesado
+# Preprocessing
 # --------------------------------------------------------------------------
 def _recortar(img: Image.Image, region) -> tuple[Image.Image, int, int]:
     if not region:
@@ -129,19 +129,19 @@ def preprocesar(
     invertir: bool | None = None,
     umbral: int | None = None,
 ) -> tuple[Image.Image, float]:
-    """Prepara texto de interfaz de juego para el OCR.
+    """Prepares game UI text for OCR.
 
-    - Gris por canal máximo (no luminancia): el texto de color (verde, azul,
-      dorado según el grado) sigue siendo claro sobre el fondo oscuro.
-    - Inversión automática si el fondo es oscuro (el OCR prefiere texto oscuro
-      sobre claro).
-    - Autocontraste, escala 2–3× (Lanczos) y umbral opcional.
-    Devuelve (imagen_en_gris, escala_aplicada).
+    - Grayscale by max channel (not luminance): colored text (green, blue,
+      gold depending on grade) stays bright on the dark background.
+    - Automatic inversion if the background is dark (OCR prefers dark text
+      on a light background).
+    - Autocontrast, 2–3× scaling (Lanczos) and optional threshold.
+    Returns (imagen_en_gris, escala_aplicada).
     """
     arr = np.asarray(img.convert("RGB"))
     gris = Image.fromarray(arr.max(axis=2).astype(np.uint8), "L")
     if invertir is None:
-        # Mediana: representa el fondo aunque haya mucho texto.
+        # Median: represents the background even when there is a lot of text.
         invertir = float(np.median(np.asarray(gris))) < 110
     if invertir:
         gris = ImageOps.invert(gris)
@@ -162,17 +162,17 @@ def preprocesar(
 
 
 # --------------------------------------------------------------------------
-# API pública
+# Public API
 # --------------------------------------------------------------------------
 def reconocer(img: Image.Image, idioma: str = "es-ES") -> list[LineaOCR]:
-    """OCR directo, sin preprocesado. Coordenadas en píxeles de `img`."""
+    """Direct OCR, without preprocessing. Coordinates in `img` pixels."""
     motor = _motor(idioma)
     bitmap = _a_software_bitmap(img)
 
     async def _ocr():
         return await motor.recognize_async(bitmap)
 
-    # Un OcrEngine no admite dos RecognizeAsync a la vez: se serializa.
+    # An OcrEngine does not support two RecognizeAsync at once: calls are serialized.
     with _ocr_lock:
         resultado = _ejecutar(_ocr())
     lineas: list[LineaOCR] = []
@@ -203,9 +203,9 @@ def leer_imagen(
     invertir: bool | None = None,
     umbral: int | None = None,
 ) -> list[LineaOCR]:
-    """Recorta `region` (x, y, w, h), preprocesa y aplica OCR.
+    """Crops `region` (x, y, w, h), preprocesses it and applies OCR.
 
-    Las cajas devueltas están en coordenadas de la imagen original.
+    The returned boxes are in the original image's coordinates.
     """
     recorte, dx, dy = _recortar(img, region)
     prep, factor = preprocesar(recorte, escala=escala, invertir=invertir, umbral=umbral)

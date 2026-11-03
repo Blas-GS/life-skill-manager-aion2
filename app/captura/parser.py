@@ -1,17 +1,17 @@
-"""Convierte líneas OCR en filas del mercado y las agrupa en libros de ofertas.
+"""Turns OCR lines into market rows and groups them into order books.
 
 FilaMercado (dict):
-    objeto_id      int | None    id del catálogo (None si no se pudo emparejar)
-    nombre_leido   str           texto del nombre tal cual lo leyó el OCR
-    precio         int | None    precio unitario en Kinah
-    cantidad       int | None    unidades del anuncio
+    objeto_id      int | None    catalog id (None if it could not be matched)
+    nombre_leido   str           name text exactly as read by the OCR
+    precio         int | None    unit price in Kinah
+    cantidad       int | None    units in the listing
     confianza      float 0–1
-    dudosa         bool          requiere revisión del usuario
-  Campos extra (no rompen el contrato):
-    nombre         str | None    nombre oficial del catálogo
-    total          int | None    precio total del anuncio, si se leyó
-    motivos        list[str]     por qué es dudosa (texto en español)
-    caja           [x, y, w, h]  zona de la fila en la imagen (para recortes)
+    dudosa         bool          needs user review
+  Extra fields (they don't break the contract):
+    nombre         str | None    official catalog name
+    total          int | None    total listing price, if it was read
+    motivos        list[str]     why it is doubtful (text in Spanish)
+    caja           [x, y, w, h]  area of the row in the image (for crops)
 """
 from __future__ import annotations
 
@@ -25,25 +25,25 @@ from rapidfuzz import fuzz, process
 
 FilaMercado = dict[str, Any]
 
-UMBRAL_DUDOSA = 0.80       # confianza por debajo → dudosa
-UMBRAL_NOMBRE = 72         # puntuación (0–100) mínima para aceptar un emparejado
-UMBRAL_CONTEXTO = 88       # cabecera sin números que fija el objeto de las filas siguientes
-MARGEN_AMBIGUO = 4         # dos candidatos a menos de esto → ambiguo
+UMBRAL_DUDOSA = 0.80       # confidence below this → doubtful
+UMBRAL_NOMBRE = 72         # minimum score (0–100) to accept a match
+UMBRAL_CONTEXTO = 88       # header without numbers that sets the item of the following rows
+MARGEN_AMBIGUO = 4         # two candidates closer than this → ambiguous
 
 # --------------------------------------------------------------------------
-# Texto
+# Text
 # --------------------------------------------------------------------------
 _NO_ALNUM = re.compile(r"[^0-9a-z]+")
 
 
 def normalizar(texto: str) -> str:
-    """Minúsculas, sin tildes ni signos, espacios simples."""
+    """Lowercase, no accents or punctuation, single spaces."""
     t = unicodedata.normalize("NFKD", texto or "")
     t = "".join(c for c in t if not unicodedata.combining(c)).lower()
     return _NO_ALNUM.sub(" ", t).strip()
 
 
-# Confusiones típicas del OCR. Solo se aplican a campos numéricos.
+# Typical OCR confusions. Only applied to numeric fields.
 _A_DIGITO = {
     "O": "0", "o": "0", "D": "0", "Q": "0", "U": "0",
     "l": "1", "I": "1", "i": "1", "|": "1", "!": "1", "L": "1", "j": "1", "J": "1",
@@ -54,7 +54,7 @@ _A_DIGITO = {
     "g": "9", "q": "9",
     "T": "7",
 }
-# Al revés, para nombres leídos con dígitos ("0kra" → "okra").
+# The other way round, for names read with digits ("0kra" → "okra").
 _A_LETRA = str.maketrans({"0": "o", "1": "l", "5": "s", "8": "b", "2": "z", "6": "g"})
 _SEPARADORES = ".,'’   "
 _ADORNOS = "xX×*:;()[]"
@@ -66,10 +66,10 @@ def _limpiar_token_numerico(texto: str) -> str:
 
 
 def es_numerico(texto: str) -> bool:
-    """¿Parece un número (aunque tenga alguna confusión O/0, l/1...)?"""
+    """Does it look like a number (even with some O/0, l/1... confusion)?"""
     t = _limpiar_token_numerico(texto)
     if not t or t == "0":
-        # Un "0" suelto suele ser el icono de la moneda (Kinah) mal leído.
+        # A lone "0" is usually the currency (Kinah) icon misread.
         return False
     digitos = sum(c.isdigit() for c in t)
     if digitos == 0:
@@ -84,17 +84,17 @@ def es_numerico(texto: str) -> bool:
             return False
     if confusos <= digitos:
         return True
-    # Muchas confusiones: solo si tiene forma clara de número con miles ("l2.5OO").
+    # Many confusions: only if it clearly looks like a number with thousands ("l2.5OO").
     mapeado = "".join(_A_DIGITO.get(c, c) if not c.isdigit() else c for c in t)
     return re.fullmatch(r"\d{1,3}([.,]\d{3})+", mapeado) is not None
 
 
 def parsear_numero(texto: str) -> tuple[int | None, bool, bool]:
-    """Lee un entero con separadores de miles españoles ("12.500", "1.234.567").
+    """Reads an integer with Spanish thousands separators ("12.500", "1.234.567").
 
-    Devuelve (valor, coherente, corregido):
-      coherente = los grupos de miles tienen 3 cifras (si no, puede ser una mala lectura)
-      corregido = se cambió alguna letra por dígito (O→0, l→1, S→5, B→8...)
+    Returns (valor, coherente, corregido):
+      coherente = the thousands groups have 3 digits (otherwise it may be a misread)
+      corregido = some letter was replaced by a digit (O→0, l→1, S→5, B→8...)
     """
     t = _limpiar_token_numerico(texto)
     if not t:
@@ -118,8 +118,8 @@ def parsear_numero(texto: str) -> tuple[int | None, bool, bool]:
         if not (1 <= len(grupos[0]) <= 3) or any(len(g) != 3 for g in grupos[1:]):
             coherente = False
     elif len(grupos[0]) > 4:
-        # Un número grande sin separador es raro en la interfaz española
-        # (puede ser un punto que el OCR se comió). Se acepta pero se avisa.
+        # A large number without a separator is unusual in the Spanish UI
+        # (the OCR may have swallowed a dot). It is accepted with a warning.
         coherente = False
     if t[0] in _SEPARADORES or t[-1] in _SEPARADORES:
         coherente = False
@@ -127,14 +127,14 @@ def parsear_numero(texto: str) -> tuple[int | None, bool, bool]:
 
 
 # --------------------------------------------------------------------------
-# Índice de nombres del catálogo
+# Catalog name index
 # --------------------------------------------------------------------------
 class IndiceNombres:
-    """Búsqueda difusa de nombres de objeto.
+    """Fuzzy search of item names.
 
-    Acepta: un `Catalogo` con `buscar(texto, limite)` (se usa para obtener
-    candidatos), un catálogo con atributo/clave `objetos` ({id: {"nombre": ...}}),
-    o un dict simple {id: nombre}. Construirlo una vez y reutilizarlo es más rápido.
+    Accepts: a `Catalogo` with `buscar(texto, limite)` (used to get candidates),
+    a catalog with an `objetos` attribute/key ({id: {"nombre": ...}}),
+    or a plain dict {id: nombre}. Building it once and reusing it is faster.
     """
 
     def __init__(self, cat, faccion: str | None = None):
@@ -156,7 +156,7 @@ class IndiceNombres:
                 if f and f != "ambas" and isinstance(v, dict):
                     fo = v.get("faccion")
                     if fo and fo not in (f, "ambas"):
-                        continue  # objeto exclusivo de la otra facción
+                        continue  # item exclusive to the other faction
                 if isinstance(nombre, str) and nombre:
                     try:
                         self.nombres[int(k)] = nombre
@@ -183,7 +183,7 @@ class IndiceNombres:
                 if self.faccion:
                     try:
                         res = self._buscar(texto, limite=limite, faccion=self.faccion) or []
-                    except TypeError:  # catálogo sin parámetro faccion
+                    except TypeError:  # catalog without a faccion parameter
                         res = self._buscar(texto, limite=limite) or []
                 else:
                     res = self._buscar(texto, limite=limite) or []
@@ -197,7 +197,7 @@ class IndiceNombres:
         return [(self._ids[i], self.nombres[self._ids[i]]) for _, _, i in res]
 
     def buscar(self, texto: str, limite: int = 5) -> list[tuple[int, str, float]]:
-        """[(id, nombre, puntuación 0–100)] ordenado de mejor a peor."""
+        """[(id, nombre, score 0–100)] sorted from best to worst."""
         truncado = texto.rstrip().endswith(("...", "…"))
         base = normalizar(texto)
         variantes = {base, normalizar(texto.translate(_A_LETRA))}
@@ -222,7 +222,7 @@ def _indice(cat, faccion: str | None = None) -> IndiceNombres:
 
 
 # --------------------------------------------------------------------------
-# Filas
+# Rows
 # --------------------------------------------------------------------------
 def _palabras(lineas: Iterable[dict]) -> list[dict]:
     salida = []
@@ -237,8 +237,8 @@ def _palabras(lineas: Iterable[dict]) -> list[dict]:
 
 
 def _agrupar_en_filas(palabras: list[dict]) -> list[list[dict]]:
-    """Agrupa palabras por su centro vertical (el OCR puede partir una fila
-    en varias líneas si las columnas están muy separadas)."""
+    """Groups words by their vertical center (the OCR may split a row into
+    several lines if the columns are far apart)."""
     if not palabras:
         return []
     alto_tipico = median(p["h"] for p in palabras) or 1
@@ -265,7 +265,7 @@ def _caja(palabras: list[dict]) -> list[float]:
 
 
 def _unir_numeros(tokens: list[dict]) -> list[dict]:
-    """Une números que el OCR partió: "12." + "500", "1" + "234.567", "12 500"."""
+    """Joins numbers the OCR split: "12." + "500", "1" + "234.567", "12 500"."""
     salida: list[dict] = []
     for t in tokens:
         if salida and t["num"] and salida[-1]["num"]:
@@ -301,7 +301,7 @@ def _asignar_por_columnas(tokens, columnas) -> dict[str, list[dict]]:
 
 
 def _decidir_por_separador(a: dict, b: dict):
-    """(precio, cantidad) si solo uno lleva separador de miles (y es ≥ 1000)."""
+    """(precio, cantidad) if only one has a thousands separator (and is ≥ 1000)."""
     if a["sep"] != b["sep"] and max(a["valor"], b["valor"]) >= 1000:
         p = a if a["sep"] else b
         return p, (b if p is a else a)
@@ -309,7 +309,7 @@ def _decidir_por_separador(a: dict, b: dict):
 
 
 def _decidir_por_ratio(a: dict, b: dict):
-    """(precio, cantidad) si uno es ≥ 10 veces el otro (indicio débil)."""
+    """(precio, cantidad) if one is ≥ 10 times the other (weak hint)."""
     grande, chico = (a, b) if a["valor"] >= b["valor"] else (b, a)
     if chico["valor"] == 0 or grande["valor"] / max(chico["valor"], 1) >= 10:
         return grande, chico
@@ -317,9 +317,9 @@ def _decidir_por_ratio(a: dict, b: dict):
 
 
 def _inferir_disposicion(filas_nums: list[list[dict]]) -> dict | None:
-    """Aprende en qué posición horizontal están el precio y la cantidad en ESTA
-    pantalla, a partir de las filas inequívocas (separador de miles). Si no hay,
-    usa el indicio débil del ratio. Devuelve {"precio": x, "cantidad": x, "factor"}."""
+    """Learns at which horizontal position price and quantity are on THIS
+    screen, from the unambiguous rows (thousands separator). If there are none,
+    uses the weak ratio hint. Returns {"precio": x, "cantidad": x, "factor"}."""
     for decisor, factor in ((_decidir_por_separador, 0.97), (_decidir_por_ratio, 0.88)):
         xs_p, xs_q = [], []
         for nums in filas_nums:
@@ -344,9 +344,9 @@ def _inferir_disposicion(filas_nums: list[list[dict]]) -> dict | None:
 
 
 def _elegir_precio_cantidad(nums: list[dict], orden: tuple[str, str], disposicion: dict | None = None):
-    """Heurística sin calibración de columnas.
+    """Heuristic without column calibration.
 
-    Devuelve (precio, cantidad, total, factor_confianza, motivos).
+    Returns (precio, cantidad, total, factor_confianza, motivos).
     """
     motivos: list[str] = []
     valores = [n["valor"] for n in nums]
@@ -372,13 +372,13 @@ def _elegir_precio_cantidad(nums: list[dict], orden: tuple[str, str], disposicio
         por_ratio = _decidir_por_ratio(a, b)
         if por_ratio is not None:
             return por_ratio[0], por_ratio[1], 0.85
-        # Ambiguo: usar el orden configurado (izquierda → derecha).
+        # Ambiguous: use the configured order (left → right).
         primero, segundo = (a, b) if a["x"] <= b["x"] else (b, a)
         if orden[0] == "precio":
             return primero, segundo, 0.7
         return segundo, primero, 0.7
 
-    # ¿Hay tres números que cuadren como precio × cantidad = total?
+    # Are there three numbers that fit price × quantity = total?
     if len(nums) >= 3:
         for i, j, k in permutations(range(len(nums)), 3):
             if i > j:
@@ -391,7 +391,7 @@ def _elegir_precio_cantidad(nums: list[dict], orden: tuple[str, str], disposicio
                     f *= 0.85
                 return p["valor"], q["valor"], c, min(1.0, f + 0.05), motivos
         motivos.append("Precio × cantidad no cuadra con ningún total")
-        # Quedarse con los dos primeros números (por posición).
+        # Keep the first two numbers (by position).
         p, q, f = precio_de_pareja(0, 1)
         return p["valor"], q["valor"], None, f * 0.75, motivos
 
@@ -408,25 +408,25 @@ def interpretar_pantalla(
     orden_numeros: tuple[str, str] = ("precio", "cantidad"),
     faccion: str | None = None,
 ) -> list[FilaMercado]:
-    """Convierte las líneas OCR de una pantalla en filas del mercado.
+    """Turns the OCR lines of one screen into market rows.
 
-    - `cat`: Catalogo, dict {id: nombre} o IndiceNombres (ver IndiceNombres).
+    - `cat`: Catalogo, dict {id: nombre} or IndiceNombres (see IndiceNombres).
     - `columnas`: {"nombre": [x0, x1], "precio": [...], "cantidad": [...], "total": [...]}
-      en coordenadas de la imagen (de la calibración). Sin columnas se usa una
-      heurística: precio = número con separador de miles / el mayor; si hay tres
-      números se busca precio × cantidad = total.
-    - Una línea con un nombre del catálogo y sin números (cabecera del libro de
-      ofertas de un objeto) asigna ese objeto a las filas siguientes sin nombre.
-    - `faccion` ("elyos"|"asmodian"): hay objetos con el mismo nombre y un id
-      distinto por facción; con la facción del servidor se elige el correcto.
-      Sin ella, esas filas salen dudosas.
+      in image coordinates (from the calibration). Without columns a heuristic is
+      used: price = number with thousands separator / the largest; if there are
+      three numbers, price × quantity = total is looked for.
+    - A line with a catalog name and no numbers (header of an item's order book)
+      assigns that item to the following rows without a name.
+    - `faccion` ("elyos"|"asmodian"): some items share a name with a different
+      id per faction; the server's faction picks the right one.
+      Without it, those rows come out doubtful.
     """
     indice = _indice(cat, faccion)
     filas: list[FilaMercado] = []
     borradores: list[dict] = []
     contexto: tuple[int, str, float] | None = None
 
-    # ---- 1ª pasada: separar nombre y números de cada fila ----
+    # ---- 1st pass: split name and numbers of each row ----
     for palabras in _agrupar_en_filas(_palabras(lineas)):
         tokens = [dict(p, num=es_numerico(p["texto"])) for p in palabras]
         tokens = _unir_numeros(tokens)
@@ -444,7 +444,7 @@ def interpretar_pantalla(
                     nums_por_col[col] = "".join(t["texto"] for t in ts) if len(ts) > 1 else ts[0]["texto"]
             hay_numeros = bool(nums_por_col)
         else:
-            # Nombre = el tramo más largo de palabras no numéricas seguidas.
+            # Name = the longest run of consecutive non-numeric words.
             tramos: list[list[dict]] = [[]]
             for t in tokens:
                 if t["num"]:
@@ -456,7 +456,7 @@ def interpretar_pantalla(
             numericos = [t for t in tokens if t["num"]]
             hay_numeros = bool(numericos)
 
-        # ---- nombre ----
+        # ---- name ----
         candidato = None
         if texto_nombre.strip() and indice:
             res = indice.buscar(texto_nombre, limite=3)
@@ -472,7 +472,7 @@ def interpretar_pantalla(
                         factor *= 0.8
 
         if not hay_numeros:
-            # Cabecera / título: fija el contexto si coincide bien con el catálogo.
+            # Header / title: sets the context if it matches the catalog well.
             if candidato and candidato[2] >= UMBRAL_CONTEXTO:
                 contexto = candidato
             continue
@@ -493,7 +493,7 @@ def interpretar_pantalla(
 
     disposicion = None if columnas else _inferir_disposicion([b["nums"] for b in borradores])
 
-    # ---- 2ª pasada: decidir precio/cantidad y emparejar ----
+    # ---- 2nd pass: decide price/quantity and match ----
     for b in borradores:
         palabras, texto_nombre, candidato = b["palabras"], b["texto_nombre"], b["candidato"]
         contexto, motivos, factor = b["contexto"], b["motivos"], b["factor"]
@@ -533,7 +533,7 @@ def interpretar_pantalla(
                 factor *= f
                 motivos.extend(m)
 
-        # ---- emparejado / contexto ----
+        # ---- matching / context ----
         objeto_id = nombre = None
         p_nombre = 0.0
         if candidato and candidato[2] >= UMBRAL_NOMBRE:
@@ -586,11 +586,11 @@ def interpretar_pantalla(
 
 
 # --------------------------------------------------------------------------
-# Libro de ofertas y consolidación
+# Order book and consolidation
 # --------------------------------------------------------------------------
 def agrupar_libro(filas: Iterable[FilaMercado], incluir_dudosas: bool = False) -> dict[int, dict]:
     """{objeto_id: {"ofertas": [(precio, cantidad)], "precio_min", "cantidad_total",
-    "num_anuncios", "nombre"}} con ofertas ordenadas por precio."""
+    "num_anuncios", "nombre"}} with offers sorted by price."""
     libros: dict[int, dict] = {}
     for f in filas:
         if f.get("objeto_id") is None or not f.get("precio") or not f.get("cantidad"):
@@ -614,13 +614,13 @@ def _clave_objeto(f: FilaMercado):
 
 
 def consolidar(fotogramas: Iterable[list[FilaMercado]]) -> list[FilaMercado]:
-    """Junta las filas de varios fotogramas de la misma sesión.
+    """Merges the rows of several frames of the same session.
 
-    Para cada objeto y cada oferta (precio, cantidad) se queda con el máximo de
-    veces que aparece en un mismo fotograma: así el solapamiento al desplazar
-    la lista no duplica anuncios, pero dos anuncios iguales visibles a la vez
-    sí cuentan dos veces. De cada oferta se conserva la lectura más fiable.
-    Las filas dudosas se conservan (sin repetir) para revisarlas.
+    For each item and each offer (precio, cantidad) it keeps the maximum number
+    of times it appears in a single frame: this way the overlap when scrolling
+    the list doesn't duplicate listings, but two identical listings visible at
+    once do count twice. For each offer the most reliable reading is kept.
+    Doubtful rows are kept (without repeats) for review.
     """
     mejores: dict[tuple, dict[tuple, list[FilaMercado]]] = {}
     dudosas: dict[tuple, FilaMercado] = {}
@@ -648,7 +648,7 @@ def consolidar(fotogramas: Iterable[list[FilaMercado]]) -> list[FilaMercado]:
                 if len(lista) > len(actual):
                     mejores[ko][kof] = lista
                 elif len(lista) == len(actual):
-                    # Misma cantidad: quedarse con la de mayor confianza.
+                    # Same quantity: keep the one with the highest confidence.
                     if sum(x["confianza"] for x in lista) > sum(x["confianza"] for x in actual):
                         mejores[ko][kof] = lista
 
@@ -659,7 +659,7 @@ def consolidar(fotogramas: Iterable[list[FilaMercado]]) -> list[FilaMercado]:
             salida.extend(mejores[ko][kof])
             claves_buenas.add((ko, kof[0], kof[1]))
     for kd, f in dudosas.items():
-        # Una fila dudosa que en otro fotograma se leyó bien ya no hace falta.
+        # A doubtful row that was read correctly in another frame is no longer needed.
         if kd not in claves_buenas:
             salida.append(f)
     return salida
@@ -673,7 +673,7 @@ def a_lecturas(
     incluir_dudosas: bool = False,
     clase_lectura=None,
 ):
-    """Convierte filas (ya revisadas) en objetos `Lectura` (de app.db) o dicts."""
+    """Turns (already reviewed) rows into `Lectura` objects (from app.db) or dicts."""
     from datetime import datetime, timezone
 
     fecha = fecha or datetime.now(timezone.utc)

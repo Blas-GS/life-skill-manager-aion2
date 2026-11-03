@@ -1,4 +1,4 @@
-"""Tests del parser (sin OCR): números, nombres difusos, filas, libro y consolidación."""
+"""Parser tests (without OCR): numbers, fuzzy names, rows, order book and consolidation."""
 import pytest
 
 from app.captura import parser
@@ -25,8 +25,8 @@ CAT = {
 
 
 def linea(*celdas, y=100, h=18):
-    """Construye una LineaOCR a partir de celdas (texto, x). Cada palabra de una
-    celda se coloca seguida, con ~9 px por carácter."""
+    """Builds a LineaOCR from cells (texto, x). Each word of a cell is placed
+    right after the previous one, with ~9 px per character."""
     palabras = []
     for texto, x in celdas:
         for trozo in texto.split():
@@ -38,7 +38,7 @@ def linea(*celdas, y=100, h=18):
 
 
 def pantalla(filas, y0=100, paso=40):
-    """filas: [(nombre, cantidad_txt, precio_txt)] → layout nombre | cantidad | precio."""
+    """filas: [(nombre, cantidad_txt, precio_txt)] → layout name | quantity | price."""
     lineas = []
     for i, (nombre, cant, precio) in enumerate(filas):
         celdas = []
@@ -52,7 +52,7 @@ def pantalla(filas, y0=100, paso=40):
     return lineas
 
 
-# ---------------------------------------------------------------- números
+# ---------------------------------------------------------------- numbers
 @pytest.mark.parametrize(
     "texto, valor, coherente, corregido",
     [
@@ -90,7 +90,7 @@ def test_normalizar_ignora_tildes_y_mayusculas():
     assert normalizar("  Poción,  de   vida ") == "pocion de vida"
 
 
-# ---------------------------------------------------------------- nombres
+# ---------------------------------------------------------------- names
 @pytest.mark.parametrize(
     "leido, esperado",
     [
@@ -129,7 +129,7 @@ def test_indice_usa_cat_buscar_si_existe():
     cat = CatFalso()
     res = IndiceNombres(cat).buscar("Okra")
     assert cat.llamadas
-    # Se vuelve a puntuar con el criterio propio: "Okra" exacto gana.
+    # Rescored with our own criterion: exact "Okra" wins.
     assert res[0][0] == 630541001 and res[0][2] == 100
 
 
@@ -175,7 +175,7 @@ def test_con_catalogo_real_si_existe():
 
     ruta = Path(__file__).resolve().parents[1] / "data" / "catalogo.json"
     if not ruta.exists():
-        pytest.skip("data/catalogo.json aún no existe")
+        pytest.skip("data/catalogo.json does not exist yet")
     from app.catalogo import cargar_catalogo
 
     cat = cargar_catalogo(ruta)
@@ -184,7 +184,7 @@ def test_con_catalogo_real_si_existe():
     assert cat.nombre(filas[0]["objeto_id"]).lower() == "mineral de orichalcum"
 
 
-# ---------------------------------------------------------------- filas
+# ---------------------------------------------------------------- rows
 def test_pantalla_basica_con_separadores():
     lineas = [linea(("Nombre del objeto", 80), ("Cantidad", 620), ("Precio unitario", 900), y=60)]
     lineas += pantalla([
@@ -202,8 +202,8 @@ def test_pantalla_basica_con_separadores():
 
 
 def test_disposicion_aprendida_resuelve_filas_ambiguas():
-    # "Od 999 | 45": sin separador ni ratio claro; la fila de Mineral enseña
-    # que el precio está a la derecha (x=900) y la cantidad a la izquierda.
+    # "Od 999 | 45": no separator and no clear ratio; the Mineral row shows
+    # that the price is on the right (x=900) and the quantity on the left.
     filas = interpretar_pantalla(pantalla([
         ("Mineral de orichalcum", "35", "12.500"),
         ("Od", "999", "450"),
@@ -230,7 +230,7 @@ def test_confusiones_en_numeros_se_corrigen():
 
 
 def test_confusiones_no_afectan_a_nombres():
-    # "Od" y "SOS" no deben convertirse en números.
+    # "Od" and "SOS" must not be turned into numbers.
     filas = interpretar_pantalla(pantalla([("Od", "12", "1.500")]), CAT)
     assert filas[0]["objeto_id"] == 620110002 and filas[0]["nombre_leido"] == "Od"
 
@@ -274,7 +274,7 @@ def test_cabecera_de_libro_asigna_objeto_a_filas_sin_nombre():
 
 
 def test_fila_partida_en_varias_lineas_ocr():
-    # El OCR devolvió nombre y números como líneas separadas a la misma altura.
+    # The OCR returned name and numbers as separate lines at the same height.
     lineas = [linea(("Mineral de orichalcum", 80), y=100), linea(("35", 620), y=101),
               linea(("12.500", 900), y=99)]
     f = interpretar_pantalla(lineas, CAT)[0]
@@ -294,7 +294,7 @@ def test_numero_partido_por_el_ocr_se_une():
 
 def test_columnas_calibradas():
     columnas = {"nombre": [60, 500], "cantidad": [560, 720], "precio": [820, 1050]}
-    # Sin separadores y con valores parecidos: solo las columnas lo deciden.
+    # No separators and similar values: only the columns decide.
     lineas = pantalla([("Od", "999", "450"), ("Okra", "300", "120")])
     filas = interpretar_pantalla(lineas, CAT, columnas=columnas)
     assert [(f["precio"], f["cantidad"]) for f in filas] == [(450, 999), (120, 300)]
@@ -307,7 +307,7 @@ def test_caja_de_la_fila():
     assert x == 80 and y == 100 and w > 800 and h == 18
 
 
-# ---------------------------------------------------------------- libro / consolidación
+# ---------------------------------------------------------------- order book / consolidation
 def _fila(oid, precio, cantidad, dudosa=False, confianza=1.0, nombre_leido="x"):
     return {"objeto_id": oid, "nombre_leido": nombre_leido, "precio": precio, "cantidad": cantidad,
             "confianza": confianza, "dudosa": dudosa}
@@ -323,8 +323,8 @@ def test_agrupar_libro():
 
 
 def test_consolidar_solapamiento_y_duplicados():
-    f1 = [_fila(1, 800, 5), _fila(1, 850, 2), _fila(1, 850, 2)]          # dos anuncios iguales
-    f2 = [_fila(1, 850, 2), _fila(1, 850, 2), _fila(1, 900, 7)]          # scroll: se solapan
+    f1 = [_fila(1, 800, 5), _fila(1, 850, 2), _fila(1, 850, 2)]          # two identical listings
+    f2 = [_fila(1, 850, 2), _fila(1, 850, 2), _fila(1, 900, 7)]          # scroll: they overlap
     f3 = [_fila(2, 40, 100), _fila(1, 950, 1, dudosa=True, confianza=0.5)]
     filas = consolidar([f1, f2, f3])
     libro = agrupar_libro(filas)

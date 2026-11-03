@@ -1,8 +1,8 @@
-"""Generador de pantallas sintéticas del mercado (fondo oscuro, texto en español).
+"""Generator of synthetic market screens (dark background, Spanish text).
 
-Imita una lista del mercado de AION 2: icono, nombre (con color según grado),
-cantidad y precio unitario con separadores de miles españoles. No es una
-captura real: sirve para probar OCR + parser de forma reproducible.
+Mimics an AION 2 market list: icon, name (colored by grade), quantity and
+unit price with Spanish thousands separators. It is not a real screenshot:
+it is used to test OCR + parser reproducibly.
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ FUENTES = ["C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/arial.ttf", "C:/Win
 
 
 def miles(n: int) -> str:
-    """12500 -> "12.500" (formato español)."""
+    """12500 -> "12.500" (Spanish format)."""
     return f"{n:,}".replace(",", ".")
 
 
@@ -70,14 +70,14 @@ def pantalla_mercado(
     margen_sup: int = 70,
     semilla: int = 1,
 ) -> Image.Image:
-    """Lista del mercado: [icono] Nombre ........ Cantidad ...... Precio [moneda]."""
+    """Market list: [icon] Name ........ Quantity ...... Price [currency]."""
     rnd = random.Random(semilla)
     alto = margen_sup + alto_fila * (len(filas) + 1) + 40
     img = Image.new("RGB", (ancho, alto), (16, 18, 24))
     d = ImageDraw.Draw(img)
     f = fuente(tam_fuente, ruta_fuente)
     fc = fuente(tam_fuente - 2, ruta_fuente)
-    # marco y título
+    # frame and title
     d.rectangle([8, 8, ancho - 8, alto - 8], outline=(70, 60, 40), width=2)
     d.text((24, 22), cabecera or "Mercado", fill=(230, 200, 140), font=f)
     y = margen_sup
@@ -88,7 +88,7 @@ def pantalla_mercado(
     for i, (nombre, precio, cantidad) in enumerate(filas):
         fondo = (26, 29, 38) if i % 2 == 0 else (21, 23, 31)
         d.rectangle([14, y, ancho - 14, y + alto_fila - 4], fill=fondo)
-        # icono
+        # icon
         c = tuple(rnd.randint(60, 200) for _ in range(3))
         d.rectangle([24, y + 5, 24 + alto_fila - 14, y + alto_fila - 9], fill=c, outline=(120, 100, 60))
         ty = y + (alto_fila - 4 - tam_fuente) // 2 - 2
@@ -97,14 +97,14 @@ def pantalla_mercado(
         d.text((700 - d.textlength(tc, font=f), ty), tc, fill=(220, 220, 220), font=f)
         tp = miles(precio)
         d.text((1010 - d.textlength(tp, font=f), ty), tp, fill=(245, 225, 160), font=f)
-        # moneda (Kinah)
+        # currency (Kinah)
         d.ellipse([1020, ty + 4, 1020 + tam_fuente - 4, ty + tam_fuente], fill=(200, 160, 60))
         y += alto_fila
     return img
 
 
 def generar_fixtures() -> list[Path]:
-    """Escribe en esta carpeta algunas pantallas de ejemplo (para inspeccionarlas)."""
+    """Writes a few sample screens into this folder (for inspection)."""
     rutas = []
     ejemplos = {
         "mercado_basico.png": [

@@ -1,11 +1,11 @@
-"""Capa de servicios: une catálogo, repositorio, motor de cálculo y captura para la API.
+"""Service layer: ties together catalog, repository, calculation engine and capture for the API.
 
-Los módulos de las otras partes (app/catalogo.py, app/db.py, app/calculo.py,
-app/precio_objetivo.py, app/captura/*) se importan de forma perezosa: si aún no
-existen o fallan, la operación que los necesita lanza `NoDisponible` con un
-mensaje en español y el resto de la app sigue funcionando.
+The modules from the other parts (app/catalogo.py, app/db.py, app/calculo.py,
+app/precio_objetivo.py, app/captura/*) are imported lazily: if they don't exist
+yet or fail, the operation that needs them raises `NoDisponible` with a
+message in Spanish and the rest of the app keeps working.
 
-Para los tests se pueden inyectar dobles: Servicios(catalogo=..., repo=..., motor=..., precio_objetivo=...).
+Tests can inject doubles: Servicios(catalogo=..., repo=..., motor=..., precio_objetivo=...).
 """
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ AJUSTES_POR_DEFECTO = {
     "tope_tmp_mb": 500,
     "horas_precio_antiguo": 24,
 }
-# claves editables desde la pestaña Ajustes y su tipo
+# keys editable from the Settings tab and their type
 _AJUSTES_EDITABLES = {
     "comision_registro": float, "impuesto_venta": float, "rebaja_listado": float,
     "combo_fallido": str, "valorar_inventario": str, "tope_tmp_mb": int,
@@ -60,11 +60,11 @@ FUENTE_POR_ORIGEN = {"grabacion": "grabacion", "video": "video", "imagen": "capt
 EXT_VIDEO = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".wmv", ".flv", ".m4v"}
 EXT_IMAGEN = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 
-# semáforo de antigüedad de precios (horas)
+# price age traffic light (hours)
 SEMAFORO_VERDE_H = 6
 SEMAFORO_AMBAR_H = 24
 
-# mensajes cuando falta un módulo
+# messages when a module is missing
 _FALTA = {
     "catalogo": "El catálogo de recetas no está disponible todavía (app/catalogo.py o data/catalogo.json). "
                 "Genera el catálogo con tools\\importar_metabot.py.",
@@ -86,7 +86,7 @@ _MODULOS = {
 
 
 class NoDisponible(RuntimeError):
-    """Un módulo de otra parte de la app aún no existe o no se pudo cargar."""
+    """A module from another part of the app does not exist yet or could not be loaded."""
 
     def __init__(self, componente: str, detalle: str | None = None):
         self.componente = componente
@@ -98,7 +98,7 @@ class NoDisponible(RuntimeError):
 
 @dataclass
 class LecturaLocal:
-    """Copia de app.db.Lectura para cuando app/db.py no existe (solo dobles de test)."""
+    """Copy of app.db.Lectura for when app/db.py does not exist (test doubles only)."""
     servidor_id: str
     objeto_id: int
     fecha: datetime
@@ -111,7 +111,7 @@ class LecturaLocal:
 
 
 # ---------------------------------------------------------------------------
-# utilidades
+# utilities
 # ---------------------------------------------------------------------------
 
 def campo(obj, nombre, defecto=None):
@@ -164,7 +164,7 @@ def normalizar(texto: str) -> str:
 
 
 def limpio(valor):
-    """Prepara un valor para JSON: sin NaN/inf, dataclasses → dict, fechas → ISO."""
+    """Prepares a value for JSON: no NaN/inf, dataclasses → dict, dates → ISO."""
     if isinstance(valor, float):
         return valor if math.isfinite(valor) else None
     if isinstance(valor, datetime):
@@ -179,7 +179,7 @@ def limpio(valor):
 
 
 def llamar(func, *args, **kwargs):
-    """Llama a `func` pasando solo los argumentos con nombre que acepta."""
+    """Calls `func` passing only the keyword arguments it accepts."""
     try:
         params = inspect.signature(func).parameters
     except (TypeError, ValueError):
@@ -215,7 +215,7 @@ def _entero_texto(texto: str) -> int | None:
 
 
 # ---------------------------------------------------------------------------
-# vista uniforme del catálogo (objeto Catalogo o dict de catalogo.json)
+# uniform view of the catalog (Catalogo object or catalogo.json dict)
 # ---------------------------------------------------------------------------
 
 class VistaCatalogo:
@@ -297,7 +297,7 @@ class VistaCatalogo:
             try:
                 res = self.cat.buscar(texto, limite=limite)
             except Exception as e:  # noqa: BLE001
-                log.warning("Catalogo.buscar falló (%s); uso la búsqueda básica", e)
+                log.warning("Catalogo.buscar failed (%s); using the basic search", e)
         if res is None:
             res = self._buscar_basico(texto, limite)
         salida = []
@@ -337,12 +337,12 @@ class VistaCatalogo:
 
 
 # ---------------------------------------------------------------------------
-# servicios
+# services
 # ---------------------------------------------------------------------------
 
 class Servicios:
-    REINTENTO_S = 5.0          # no reintentar importar un módulo que falta más a menudo
-    TOP_ESCENARIOS = 15        # filas del panel con escenario "vender a precio objetivo"
+    REINTENTO_S = 5.0          # don't retry importing a missing module more often than this
+    TOP_ESCENARIOS = 15        # dashboard rows with the "sell at target price" scenario
     TTL_OBJETIVO_S = 300
 
     def __init__(self, catalogo=None, repo=None, motor=None, precio_objetivo=None,
@@ -366,10 +366,10 @@ class Servicios:
         self.sesiones: dict[str, dict] = {}
         self.ruta_sesiones = ruta_sesiones if ruta_sesiones is not None else RUTA_SESIONES
         self.arranque_info: dict = {}
-        self.segundo_plano = True   # procesar vídeos/imágenes en un hilo (los tests lo desactivan)
+        self.segundo_plano = True   # process videos/images in a thread (tests turn this off)
         self._cargar_sesiones()
 
-    # --- carga perezosa ----------------------------------------------------
+    # --- lazy loading ------------------------------------------------------
     def _puede_reintentar(self, componente) -> bool:
         ultimo = self._ultimo_intento.get(componente)
         return ultimo is None or time.monotonic() - ultimo >= self.REINTENTO_S
@@ -401,7 +401,7 @@ class Servicios:
                     except ModuleNotFoundError as e:
                         if not (e.name or "").startswith("app") or not RUTA_CATALOGO.exists():
                             raise
-                        # catalogo.py aún no existe pero el JSON sí: lo leo tal cual
+                        # catalogo.py doesn't exist yet but the JSON does: read it as is
                         cat = json.loads(RUTA_CATALOGO.read_text(encoding="utf-8"))
                         self.errores["catalogo"] = ("app/catalogo.py aún no existe: se lee data/catalogo.json "
                                                     "directamente (búsqueda básica).")
@@ -431,7 +431,7 @@ class Servicios:
 
     def modulo(self, componente: str):
         if componente in self._mods:
-            if self._mods[componente] is None:  # marcado como ausente (tests)
+            if self._mods[componente] is None:  # marked as missing (tests)
                 raise NoDisponible(componente)
             return self._mods[componente]
         if not self._puede_reintentar(componente) and componente in self.errores:
@@ -465,9 +465,9 @@ class Servicios:
         except Exception:  # noqa: BLE001
             return LecturaLocal
 
-    # --- arranque ------------------------------------------------------------
+    # --- startup -------------------------------------------------------------
     def arranque(self) -> dict:
-        """Carga el catálogo, sube la cola offline y limpia temporales verificados."""
+        """Loads the catalog, uploads the offline queue and cleans up verified temporary files."""
         info: dict[str, Any] = {"inicio": iso(ahora())}
         try:
             info["recetas"] = len(self.cat.recetas)
@@ -492,10 +492,10 @@ class Servicios:
             info["temporales"] = f"No se pudieron limpiar los temporales: {e}"
         info["fin"] = iso(ahora())
         self.arranque_info = info
-        log.info("Arranque: %s", info)
+        log.info("Startup: %s", info)
         return info
 
-    # --- estado ----------------------------------------------------------------
+    # --- status ----------------------------------------------------------------
     def estado(self) -> dict:
         componentes = {}
         for nombre in ("catalogo", "repo", "motor", "precio_objetivo", "ocr", "parser",
@@ -543,7 +543,7 @@ class Servicios:
             pass
         return {"archivos": n, "mb": round(total / 1_048_576, 1), "tope_mb": tope}
 
-    # --- perfiles / servidores ------------------------------------------------
+    # --- profiles / servers ---------------------------------------------------
     def servidores(self) -> list[dict]:
         return self.repo.listar_servidores()
 
@@ -564,7 +564,7 @@ class Servicios:
             if k in datos:
                 v = _num(datos.get(k), float, k, 0)
                 if v is not None and v > 1:
-                    v = v / 100.0  # aceptar porcentaje
+                    v = v / 100.0  # accept a percentage
                 fila[k] = v
         return self.repo.guardar_servidor(fila)
 
@@ -595,7 +595,7 @@ class Servicios:
         return candidato
 
     def contexto(self, perfil_id: str | None) -> dict:
-        """Perfil, servidor, facción, niveles, inventario y ajustes efectivos."""
+        """Profile, server, faction, levels, inventory and effective settings."""
         perfiles = self.repo.listar_perfiles()
         perfil = None
         if perfil_id:
@@ -618,7 +618,7 @@ class Servicios:
             "ajustes": self.ajustes_efectivos(servidor),
         }
 
-    # --- niveles e inventario ---------------------------------------------------
+    # --- levels and inventory ---------------------------------------------------
     def niveles(self, perfil_id) -> dict:
         actuales = self.repo.niveles(perfil_id)
         return {k: int(actuales.get(k, 1)) for k in self._claves_profesion()} | {
@@ -671,7 +671,7 @@ class Servicios:
     _RE_CANT_NOMBRE = re.compile(r"^(?P<cant>\d[\d.,']*)\s*[xX×]?\s+(?P<nombre>\D.*)$")
 
     def interpretar_pegado(self, texto: str) -> list[dict]:
-        """Texto «nombre: cantidad» (una línea por objeto) → filas emparejadas con el catálogo."""
+        """Text «name: quantity» (one line per item) → rows matched against the catalog."""
         cat = self.cat
         salida = []
         for n, linea in enumerate((texto or "").splitlines(), 1):
@@ -696,7 +696,7 @@ class Servicios:
             })
         return salida
 
-    # --- ajustes y precios NPC ----------------------------------------------------
+    # --- settings and NPC prices --------------------------------------------------
     def _ajustes_base(self) -> dict:
         return {**AJUSTES_POR_DEFECTO, **{k: v for k, v in (self.repo.ajustes() or {}).items() if v is not None}}
 
@@ -760,7 +760,7 @@ class Servicios:
     def _precios_npc_dict(self) -> dict[int, float]:
         return {int(k): float(v) for k, v in (self.repo.precios_npc() or {}).items()}
 
-    # --- precios de mercado -------------------------------------------------------
+    # --- market prices ------------------------------------------------------------
     def precios(self, servidor_id) -> dict:
         if not servidor_id:
             return {}
@@ -824,7 +824,7 @@ class Servicios:
         if not servidor_id:
             raise ValueError("Falta el servidor: elige un perfil con servidor.")
         oid = _num(datos.get("objeto_id"), int, "objeto", permitir_none=False)
-        self.cat.objeto(oid)  # valida que el catálogo cargue
+        self.cat.objeto(oid)  # checks that the catalog loads
         ofertas = self._ofertas_de(datos.get("ofertas"), datos.get("ofertas_texto"))
         precio = _num(datos.get("precio_min"), float, "precio", 0)
         cantidad = _num(datos.get("cantidad_total"), int, "cantidad", 0)
@@ -878,7 +878,7 @@ class Servicios:
         self._cache_objetivo[clave] = (time.monotonic(), res)
         return res
 
-    # --- análisis ---------------------------------------------------------------
+    # --- analysis ---------------------------------------------------------------
     def _nivel(self, ctx, profesion) -> int:
         return int(ctx["niveles"].get(profesion, ctx["ajustes"].get("nivel_por_defecto", 1)))
 
@@ -954,7 +954,7 @@ class Servicios:
             except NoDisponible:
                 pass
             except Exception as e:  # noqa: BLE001
-                log.warning("Escenario objetivo de %s falló: %s", a.get("receta_id"), e)
+                log.warning("Target scenario for %s failed: %s", a.get("receta_id"), e)
         return fila
 
     def _escenario_objetivo(self, receta, a, ctx, precios, npc, n, inventario) -> dict | None:
@@ -980,7 +980,7 @@ class Servicios:
             "rango_p25": po.get("rango_p25"), "mediana": po.get("mediana"), "rango_p75": po.get("rango_p75"),
         }
 
-    # --- recetas ------------------------------------------------------------------
+    # --- recipes ------------------------------------------------------------------
     def recetas(self, perfil_id=None, texto=None, profesion=None, solo_desbloqueadas=False, limite=300) -> dict:
         cat = self.cat
         try:
@@ -1039,7 +1039,7 @@ class Servicios:
         return limpio(salida)
 
     def _coste_fabricar(self, oid, ctx, precios, npc):
-        """Mejor receta desbloqueada para fabricar `oid`: (coste unitario, receta, análisis)."""
+        """Best unlocked recipe for crafting `oid`: (unit cost, recipe, analysis)."""
         mejor = (None, None, None)
         for r in self.cat.recetas_que_producen(oid):
             if ctx["faccion"] and r.get("faccion") not in (ctx["faccion"], "ambas", None):
@@ -1159,7 +1159,7 @@ class Servicios:
                                                               "precio_ultimo": precio})
                     item["cantidad"] += unidades
 
-    # --- operaciones propias --------------------------------------------------------
+    # --- own operations -------------------------------------------------------------
     def registrar_operacion(self, datos: dict) -> dict:
         tipo = datos.get("tipo")
         if tipo not in ("venta", "compra"):
@@ -1170,7 +1170,7 @@ class Servicios:
             utc(datos.get("fecha")) or ahora()))
 
     # ===========================================================================
-    # captura
+    # capture
     # ===========================================================================
     def _cargar_sesiones(self):
         try:
@@ -1184,7 +1184,7 @@ class Servicios:
 
     def _persistir_sesiones(self):
         with self._lock:
-            # se guardan las que esperan revisión y las 20 últimas terminadas
+            # keep those awaiting review and the last 20 finished ones
             ordenadas = sorted(self.sesiones.values(), key=lambda s: s.get("creada") or "", reverse=True)
             guardar = [s for s in ordenadas if s["estado"] in ("revision", "procesando")]
             guardar += [s for s in ordenadas if s["estado"] not in ("revision", "procesando")][:20]
@@ -1195,7 +1195,7 @@ class Servicios:
                 tmp.write_text(json.dumps(limpio(guardar), ensure_ascii=False, indent=1), encoding="utf-8")
                 os.replace(tmp, ruta)
             except OSError as e:
-                log.warning("No se pudieron guardar las sesiones de captura: %s", e)
+                log.warning("Could not save the capture sessions: %s", e)
 
     @staticmethod
     def resumen_sesion(s: dict) -> dict:
@@ -1278,7 +1278,7 @@ class Servicios:
             origen = "imagen"
         else:
             raise ValueError("Formato no admitido: sube un vídeo (mp4, mkv, mov…) o una imagen (png, jpg…).")
-        # comprobar dependencias antes de lanzar el hilo
+        # check dependencies before starting the thread
         self.modulo("video" if origen == "video" else "grabacion")
         s = self._nueva_sesion(origen, servidor_id, archivo=ruta, nombre_archivo=nombre)
 
@@ -1307,7 +1307,7 @@ class Servicios:
                                         pass
                 self._registrar_filas(s, filas)
             except Exception as e:  # noqa: BLE001
-                log.exception("Error procesando %s", nombre)
+                log.exception("Error processing %s", nombre)
                 s.update(estado="error", error=f"{type(e).__name__}: {e}")
                 self._persistir_sesiones()
 
@@ -1369,7 +1369,7 @@ class Servicios:
         return self.sesion(sesion_id)
 
     def guardar_sesion(self, sesion_id, descartar_pendientes: bool = True) -> dict:
-        """Guarda las filas correctas de la sesión (las pendientes se descartan)."""
+        """Saves the session's correct rows (pending ones are discarded)."""
         s = self.sesiones.get(sesion_id)
         if s is None:
             raise LookupError("Esa sesión de lectura no existe.")
@@ -1419,11 +1419,11 @@ class Servicios:
             if p.resolve().is_relative_to(DIR_TMP.resolve()) and p.exists():
                 p.unlink()
         except OSError as e:
-            log.warning("No se pudo borrar %s: %s", p, e)
+            log.warning("Could not delete %s: %s", p, e)
 
     def _limpiar_archivo(self, s: dict, verificado: bool = False) -> None:
-        """Tras revisar/guardar una sesión: borra los recortes revisados y el vídeo/imagen
-        de origen, este último solo cuando sus lecturas están verificadas en la base de datos."""
+        """After reviewing/saving a session: deletes the reviewed crops and the source
+        video/image, the latter only once its readings are verified in the database."""
         archivo = s.get("archivo")
         recortes = [f["recorte"] for f in s.get("filas") or [] if f.get("recorte")]
         ids = s.get("ids_guardados") or []
@@ -1432,26 +1432,26 @@ class Servicios:
         except NoDisponible:
             temporales = None
 
-        # recortes de filas dudosas: ya revisados (la sesión está cerrada)
+        # crops of doubtful rows: already reviewed (the session is closed)
         for ruta in recortes:
             marcado = False
             if temporales is not None and hasattr(temporales, "marcar_revisado"):
                 try:
                     marcado = bool(temporales.marcar_revisado(ruta))
                 except Exception as e:  # noqa: BLE001
-                    log.warning("marcar_revisado falló: %s", e)
+                    log.warning("marcar_revisado failed: %s", e)
             if not marcado:
                 self._borrar_tmp(ruta)
         if recortes and temporales is not None and hasattr(temporales, "limpiar_revisados"):
             try:
                 temporales.limpiar_revisados()
             except Exception as e:  # noqa: BLE001
-                log.warning("limpiar_revisados falló: %s", e)
+                log.warning("limpiar_revisados failed: %s", e)
 
         if not archivo:
             return
         if verificado or not ids:
-            # no salió ningún dato de este archivo (nada que verificar): se puede borrar ya
+            # no data came out of this file (nothing to verify): it can be deleted now
             self._borrar_tmp(archivo)
             return
         if temporales is not None:
@@ -1460,7 +1460,7 @@ class Servicios:
                 llamar(temporales.limpiar_verificados, self.repo)
                 return
             except Exception as e:  # noqa: BLE001
-                log.warning("temporales falló (%s); verifico y borro directamente", e)
+                log.warning("temporales failed (%s); verifying and deleting directly", e)
         try:
             ok = self.repo.verificar_lecturas(ids) is True
         except Exception:  # noqa: BLE001
@@ -1480,7 +1480,7 @@ class Servicios:
             raise LookupError("No hay imagen de esa fila.")
         return Path(ruta)
 
-    # --- calibración ------------------------------------------------------------
+    # --- calibration ------------------------------------------------------------
     def calibracion(self) -> dict:
         cal = self.modulo("calibracion")
         datos = cal.cargar()
@@ -1510,7 +1510,7 @@ class Servicios:
         return self.calibracion()
 
     def captura_pantalla(self, espera: float = 0, max_ancho: int = 1600) -> tuple[bytes, int, int]:
-        """Captura pasiva (mss) del monitor calibrado para marcar la región. Devuelve (jpeg, ancho, alto)."""
+        """Passive capture (mss) of the calibrated monitor to mark the region. Returns (jpeg, width, height)."""
         import io
 
         import mss
