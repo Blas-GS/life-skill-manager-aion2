@@ -1,0 +1,5 @@
+# Texto con saltos de línea normalizados en el repositorio
+* text=auto
+# Los .bat necesitan CRLF en Windows (con LF fallan las etiquetas como :crear_venv)
+*.bat text eol=crlf
+*.png binary
