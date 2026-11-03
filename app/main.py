@@ -16,6 +16,8 @@ from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from app.categorias import mapa_categorias
+from app.iconos import DescargaIconos, ruta_icono
 from app.servicios import DIR_TMP, NoDisponible, Servicios, limpio
 
 log = logging.getLogger("aion2.api")
@@ -27,8 +29,10 @@ def _error_bd(e: Exception) -> bool:
     return type(e).__name__ in ("ErrorBaseDatos", "ErrorRed")
 
 
-def crear_app(servicios: Servicios | None = None, arrancar: bool = True) -> FastAPI:
+def crear_app(servicios: Servicios | None = None, arrancar: bool = True,
+              iconos: DescargaIconos | None = None) -> FastAPI:
     serv = servicios or Servicios()
+    descarga_iconos = iconos or DescargaIconos()
 
     @asynccontextmanager
     async def ciclo(app_: FastAPI):
@@ -151,6 +155,26 @@ def crear_app(servicios: Servicios | None = None, arrancar: bool = True) -> Fast
     @app.get("/api/catalogo/buscar")
     def buscar(q: str = "", limite: int = Query(10, ge=1, le=50)):
         return serv.cat.buscar(q, limite)
+
+    @app.get("/api/catalogo/iconos")
+    def iconos():
+        """Icon category and Spanish/English name of every object, plus the official icons the user
+        downloaded (local only)."""
+        objetos = serv.cat.objetos
+        nombres = {str(oid): [o.get("nombre"), o.get("nombre_en")] for oid, o in (objetos or {}).items()}
+        return {"categorias": mapa_categorias(objetos), "nombres": nombres,
+                "oficiales": descarga_iconos.mapa(objetos), "descarga": dict(descarga_iconos.estado)}
+
+    @app.post("/api/catalogo/iconos/descargar")
+    def descargar_iconos():
+        return descarga_iconos.iniciar(serv.cat.objetos)
+
+    @app.get("/api/iconos/{nombre}")
+    def icono_local(nombre: str):
+        ruta = ruta_icono(nombre, descarga_iconos.carpeta)
+        if ruta is None:
+            raise HTTPException(404, "Icono no descargado.")
+        return FileResponse(ruta, headers={"Cache-Control": "max-age=604800"})
 
     @app.get("/api/catalogo/objeto/{objeto_id}")
     def objeto(objeto_id: int):
