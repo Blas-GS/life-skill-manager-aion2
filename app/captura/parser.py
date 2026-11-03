@@ -180,13 +180,7 @@ class IndiceNombres:
     def _candidatos(self, texto: str, limite: int) -> list[tuple[int, str]]:
         if self._buscar is not None:
             try:
-                if self.faccion:
-                    try:
-                        res = self._buscar(texto, limite=limite, faccion=self.faccion) or []
-                    except TypeError:  # catalog without a faccion parameter
-                        res = self._buscar(texto, limite=limite) or []
-                else:
-                    res = self._buscar(texto, limite=limite) or []
+                res = self._buscar(texto, limite=limite, faccion=self.faccion) or []
                 return [(int(r[0]), r[1]) for r in res]
             except Exception:
                 pass
