@@ -1,7 +1,7 @@
-"""Precio objetivo de venta/compra a partir del histórico de lecturas del mercado.
+"""Target sell/buy price from the history of market readings.
 
-Las lecturas pueden ser objetos `Lectura` (app/db.py) o dicts con los mismos campos:
-se leen por duck typing, así este módulo no depende de app/db.py.
+Readings can be `Lectura` objects (app/db.py) or dicts with the same fields:
+they are read by duck typing, so this module does not depend on app/db.py.
 """
 from __future__ import annotations
 
@@ -9,24 +9,24 @@ import math
 from datetime import datetime, timedelta, timezone
 
 AJUSTES_PRECIO_POR_DEFECTO = {
-    "rebaja_listado": 1,            # Kinah por debajo del más barato al listar
-    "dias_saturado": 7,             # saturado si hay en oferta más de N días de ventas
-    "rebaja_saturado_pct": 0.03,    # rebaja extra (fracción) cuando el producto está saturado
-    "min_lecturas_historico": 3,    # por debajo, no se calculan percentiles
-    "horas_min_volumen": 12,        # tramo mínimo de histórico para fiarse del volumen
+    "rebaja_listado": 1,            # Kinah below the cheapest listing when listing
+    "dias_saturado": 7,             # saturated if more than N days of sales are on offer
+    "rebaja_saturado_pct": 0.03,    # extra undercut (fraction) when the product is saturated
+    "min_lecturas_historico": 3,    # below this, percentiles are not computed
+    "horas_min_volumen": 12,        # minimum history span needed to trust the volume
 }
 
 
-# --- utilidades compartidas (también las usa app/calculo.py) -----------------
+# --- shared utilities (also used by app/calculo.py) --------------------------
 
 def fmt(numero, decimales=0) -> str:
-    """Formato español de números: 272.565,70"""
+    """Spanish number format: 272.565,70"""
     texto = f"{numero:,.{decimales}f}"
     return texto.replace(",", "_").replace(".", ",").replace("_", ".")
 
 
 def campo(obj, nombre, defecto=None):
-    """Lee un campo de un dict o de un objeto (Lectura, InfoPrecio...)."""
+    """Reads a field from a dict or an object (Lectura, InfoPrecio...)."""
     if obj is None:
         return defecto
     if isinstance(obj, dict):
@@ -37,7 +37,7 @@ def campo(obj, nombre, defecto=None):
 
 
 def a_utc(fecha):
-    """datetime/ISO str -> datetime con zona UTC (las fechas sin zona se toman como UTC)."""
+    """datetime/ISO str -> UTC-aware datetime (naive dates are taken as UTC)."""
     if fecha is None:
         return None
     if isinstance(fecha, str):
@@ -51,7 +51,7 @@ def a_utc(fecha):
 
 
 def percentil(valores, p):
-    """Percentil con interpolación lineal (igual que numpy.percentile por defecto)."""
+    """Percentile with linear interpolation (same as numpy.percentile by default)."""
     datos = sorted(valores)
     if not datos:
         return None
@@ -81,10 +81,10 @@ def _precios(lecturas):
             if campo(l, "precio_min") is not None and float(campo(l, "precio_min")) > 0]
 
 
-# --- volumen -----------------------------------------------------------------
+# --- volume ------------------------------------------------------------------
 
 def _volumen(historico):
-    """(unidades/día, horas cubiertas). Las caídas de cantidad_total cuentan como ventas."""
+    """(units/day, hours covered). Drops in cantidad_total count as sales."""
     lecturas = [l for l in _ordenadas(historico) if campo(l, "cantidad_total") is not None]
     if len(lecturas) < 2:
         return 0.0, 0.0
@@ -100,14 +100,14 @@ def _volumen(historico):
 
 
 def volumen_estimado(historico) -> float:
-    """Unidades vendidas por día estimadas = suma de caídas de cantidad_total / días cubiertos."""
+    """Estimated units sold per day = sum of drops in cantidad_total / days covered."""
     return _volumen(historico)[0]
 
 
-# --- precio de venta ---------------------------------------------------------
+# --- sell price --------------------------------------------------------------
 
 def _unidades_por_delante(actual, precio):
-    """Unidades en oferta más baratas que `precio` (se venderán antes que las nuestras)."""
+    """Units on offer cheaper than `precio` (they will sell before ours)."""
     ofertas = campo(actual, "ofertas") or []
     if ofertas:
         return sum(int(c) for p, c in ofertas if p is not None and c and float(p) < precio)
@@ -119,12 +119,12 @@ def _unidades_por_delante(actual, precio):
 
 def precio_objetivo_venta(historico, actual=None, ajustes=None, *, unidades=1,
                           ventana_dias=None, ahora=None) -> dict:
-    """Precio recomendado para listar un objeto.
+    """Recommended price for listing an item.
 
-    - normal: actual dentro o por encima de P25–P75 → justo por debajo del más barato.
-    - hundido: actual < P25 → recomendar la mediana y esperar.
-    - saturado: en oferta > dias_saturado × ventas/día → precio más agresivo.
-    - sin_datos: histórico insuficiente.
+    - normal: current price within or above P25–P75 → just below the cheapest listing.
+    - hundido (crashed): current < P25 → recommend the median and wait.
+    - saturado (saturated): on offer > dias_saturado × sales/day → more aggressive price.
+    - sin_datos (no data): not enough history.
     """
     aj = _ajustes(ajustes)
     lecturas = _ordenadas(historico)
@@ -206,10 +206,10 @@ def precio_objetivo_venta(historico, actual=None, ajustes=None, *, unidades=1,
     return resultado
 
 
-# --- precio de compra --------------------------------------------------------
+# --- buy price ---------------------------------------------------------------
 
 def precio_objetivo_compra(historico, actual=None, ajustes=None) -> dict:
-    """"Compra por debajo de X" (≈P25 del precio mínimo histórico)."""
+    """"Buy below X" (≈P25 of the historical minimum price)."""
     aj = _ajustes(ajustes)
     lecturas = _ordenadas(historico)
     if actual is None and lecturas:

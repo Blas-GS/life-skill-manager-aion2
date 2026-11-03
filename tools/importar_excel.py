@@ -1,12 +1,12 @@
-r"""Siembra el histórico con los precios del Excel «aion2-market-place-recipe-book (1).xlsx».
+r"""Seeds the price history with the prices from the Excel file «aion2-market-place-recipe-book (1).xlsx».
 
-Lee la hoja "Prices" (B = objeto en inglés, C = precio, D = notas; filas 6–88), empareja cada
-nombre con `nombre_en` del catálogo (exacto y luego difuso) y guarda:
-  - las filas de mercado como lecturas fuente="excel" con fecha 2026-10-09 en el servidor indicado;
-  - las filas marcadas como NPC/tienda (o «(Bound)») como precios NPC.
-Muestra un informe de lo no emparejado. Es idempotente: no repite lecturas excel de ese día.
+Reads the "Prices" sheet (B = item in English, C = price, D = notes; rows 6–88), matches each
+name against the catalog's `nombre_en` (exact first, then fuzzy) and saves:
+  - market rows as readings with fuente="excel" dated 2026-10-09 on the given server;
+  - rows marked as NPC/shop (or «(Bound)») as NPC prices.
+Prints a report of what could not be matched. It is idempotent: it doesn't repeat that day's excel readings.
 
-Uso:
+Usage:
     .\.venv\Scripts\python.exe tools\importar_excel.py --servidor <id_servidor> [--excel RUTA] [--simular]
 """
 from __future__ import annotations
@@ -25,8 +25,8 @@ EXCEL_POR_DEFECTO = RAIZ / "aion2-market-place-recipe-book (1).xlsx"
 FECHA_EXCEL = datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc)
 FILA_INICIO, FILA_FIN = 6, 88
 UMBRAL_DIFUSO = 88
-# nombres del Excel que no coinciden con el cliente; comprobado con el coste de Okra frita
-# del Excel (3×700 + 3×788 + 5×880 = 8.864)
+# Excel names that don't match the game client; checked against the cost of Okra frita
+# in the Excel file (3×700 + 3×788 + 5×880 = 8.864)
 ALIAS = {"oil": "Ulmus Oil (Bound)"}
 
 
@@ -50,7 +50,7 @@ def leer_excel(ruta: Path) -> list[dict]:
 
     wb = openpyxl.load_workbook(ruta, data_only=True, read_only=True)
     if "Prices" not in wb.sheetnames:
-        raise SystemExit(f"El Excel no tiene la hoja «Prices» (hojas: {', '.join(wb.sheetnames)})")
+        raise SystemExit(f"The Excel file has no «Prices» sheet (sheets: {', '.join(wb.sheetnames)})")
     ws = wb["Prices"]
     filas = []
     for i, (nombre, precio, notas) in enumerate(
@@ -64,7 +64,7 @@ def leer_excel(ruta: Path) -> list[dict]:
 
 
 class Emparejador:
-    """Nombre en inglés → id del catálogo."""
+    """English name → catalog id."""
 
     def __init__(self, objetos: dict):
         self.exactos: dict[str, list[int]] = {}
@@ -100,7 +100,7 @@ class Emparejador:
 
         res = process.extractOne(n, self.nombres, scorer=fuzz.WRatio)
         if res and res[1] >= UMBRAL_DIFUSO:
-            # evitar que un nombre corto («Oil») case con uno largo que solo lo contiene
+            # avoid a short name («Oil») matching a long one that merely contains it
             a, c = len(sin_vinculado(n)), len(sin_vinculado(res[0]))
             if min(a, c) / max(a, c, 1) >= 0.6:
                 return int(res[2]), "difuso", float(res[1])
@@ -123,20 +123,20 @@ def cargar_objetos() -> dict:
 
     ruta = RAIZ / "data" / "catalogo.json"
     if not ruta.exists():
-        raise SystemExit("No existe data/catalogo.json: genera antes el catálogo (tools\\importar_metabot.py).")
+        raise SystemExit("data/catalogo.json does not exist: generate the catalog first (tools\\importar_metabot.py).")
     return json.loads(ruta.read_text(encoding="utf-8")).get("objetos") or {}
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Importa los precios del Excel (hoja Prices) como histórico inicial.")
-    ap.add_argument("--servidor", required=True, help="id del servidor (pestaña Personaje) donde guardar los precios")
-    ap.add_argument("--excel", default=str(EXCEL_POR_DEFECTO), help="ruta del Excel")
-    ap.add_argument("--simular", action="store_true", help="solo mostrar el informe, sin guardar nada")
+    ap = argparse.ArgumentParser(description="Imports the Excel prices (Prices sheet) as the initial history.")
+    ap.add_argument("--servidor", required=True, help="server id (Character tab) where the prices are saved")
+    ap.add_argument("--excel", default=str(EXCEL_POR_DEFECTO), help="path to the Excel file")
+    ap.add_argument("--simular", action="store_true", help="only print the report, save nothing")
     args = ap.parse_args(argv)
 
     ruta = Path(args.excel)
     if not ruta.exists():
-        raise SystemExit(f"No encuentro el Excel: {ruta}")
+        raise SystemExit(f"Excel file not found: {ruta}")
     filas = leer_excel(ruta)
     emp = Emparejador(cargar_objetos())
 
@@ -145,15 +145,15 @@ def main(argv=None) -> int:
     repo = obtener_repositorio()
     servidores = {s["id"]: s for s in repo.listar_servidores()}
     if args.servidor not in servidores:
-        disponibles = ", ".join(f"{k} ({v['nombre']})" for k, v in servidores.items()) or "ninguno"
-        raise SystemExit(f"El servidor «{args.servidor}» no existe. Créalo en la pestaña Personaje. Disponibles: {disponibles}")
+        disponibles = ", ".join(f"{k} ({v['nombre']})" for k, v in servidores.items()) or "none"
+        raise SystemExit(f"Server «{args.servidor}» does not exist. Create it in the Character tab. Available: {disponibles}")
 
     lecturas, npc, sin_precio, no_emp, repetidas = [], [], [], [], []
-    print(f"Excel: {ruta.name} · {len(filas)} filas · servidor {servidores[args.servidor]['nombre']} · BD {repo.backend}\n")
+    print(f"Excel: {ruta.name} · {len(filas)} rows · server {servidores[args.servidor]['nombre']} · DB {repo.backend}\n")
     for f in filas:
         oid, modo, punt = emp.buscar(f["nombre"])
         npc_fila = es_npc(f["nombre"], f["notas"])
-        etiqueta = "NPC" if npc_fila else "mercado"
+        etiqueta = "NPC" if npc_fila else "market"
         if oid is None:
             no_emp.append((f, modo))
             continue
@@ -162,7 +162,7 @@ def main(argv=None) -> int:
             sin_precio.append((f, oid))
             continue
         destino = f"#{oid}" + (f" ({modo}, {punt:.0f})" if modo != "exacto" else "")
-        print(f"  fila {f['fila']:>2} {etiqueta:<7} {f['nombre']:<36} {precio:>10,.0f} → {destino}".replace(",", "."))
+        print(f"  row {f['fila']:>2} {etiqueta:<7} {f['nombre']:<36} {precio:>10,.0f} → {destino}".replace(",", "."))
         if npc_fila:
             npc.append((oid, float(precio)))
         else:
@@ -170,7 +170,7 @@ def main(argv=None) -> int:
                                     precio_min=float(precio), cantidad_total=None, num_anuncios=None,
                                     ofertas=[], fuente="excel"))
 
-    # idempotencia: no repetir lecturas excel del mismo día
+    # idempotency: don't repeat excel readings from the same day
     nuevas = []
     for lec in lecturas:
         previas = repo.historico(args.servidor, lec.objeto_id, FECHA_EXCEL.replace(hour=0))
@@ -181,24 +181,24 @@ def main(argv=None) -> int:
 
     print()
     if sin_precio:
-        print(f"Sin precio en el Excel ({len(sin_precio)}): " + "; ".join(f["nombre"] for f, _ in sin_precio))
+        print(f"No price in the Excel file ({len(sin_precio)}): " + "; ".join(f["nombre"] for f, _ in sin_precio))
     if no_emp:
-        print(f"\nNO EMPAREJADOS ({len(no_emp)}) — revisa los nombres o añádelos a mano en la app:")
+        print(f"\nUNMATCHED ({len(no_emp)}) — check the names or add them by hand in the app:")
         for f, motivo in no_emp:
-            print(f"  fila {f['fila']:>2} {f['nombre']:<40} {motivo}")
-    print(f"\nResumen: {len(nuevas)} lecturas nuevas, {len(repetidas)} ya importadas, {len(npc)} precios NPC, "
-          f"{len(no_emp)} sin emparejar, {len(sin_precio)} sin precio.")
+            print(f"  row {f['fila']:>2} {f['nombre']:<40} {motivo}")
+    print(f"\nSummary: {len(nuevas)} new readings, {len(repetidas)} already imported, {len(npc)} NPC prices, "
+          f"{len(no_emp)} unmatched, {len(sin_precio)} without price.")
 
     if args.simular:
-        print("Modo simulación: no se ha guardado nada.")
+        print("Dry run: nothing was saved.")
         return 0
     if nuevas:
         res = repo.guardar_lecturas(nuevas, "excel-2026-10-09")
-        print(f"Guardadas {len(res.ids)} lecturas" + (" (en la cola offline: se subirán al reconectar)." if res.en_cola else "."))
+        print(f"Saved {len(res.ids)} readings" + (" (in the offline queue: they will upload on reconnect)." if res.en_cola else "."))
     for oid, precio in npc:
         repo.guardar_precio_npc(oid, precio)
     if npc:
-        print(f"Guardados {len(npc)} precios NPC.")
+        print(f"Saved {len(npc)} NPC prices.")
     return 0
 
 

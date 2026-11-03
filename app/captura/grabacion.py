@@ -1,17 +1,17 @@
-"""Modo grabación: captura PASIVA de pantalla mientras el usuario navega el mercado.
+"""Recording mode: PASSIVE screen capture while the user browses the market.
 
-Seguridad (anticheat NCGuard): solo se usa mss para copiar los píxeles de la
-pantalla. No se envían clics ni teclas, no se abre el proceso del juego, no se
-lee su memoria ni su red.
+Security (NCGuard anti-cheat): only mss is used to copy the screen pixels.
+No clicks or keys are sent, the game process is not opened, and its memory
+and network are not read.
 
-Los fotogramas viven solo en memoria. Lo único que se escribe en disco son
-recortes pequeños de filas dudosas (`capturas/tmp/revision/`) para que el
-usuario las revise; se registran en `temporales` y se borran tras revisarlas.
+Frames live only in memory. The only thing written to disk is small crops
+of doubtful rows (`capturas/tmp/revision/`) for the user to review; they are
+registered in `temporales` and deleted after review.
 
     sesion = SesionGrabacion(fps=3, cat=catalogo)
     sesion.iniciar()
-    ...                       # el usuario recorre el mercado a mano
-    filas = sesion.detener()  # list[FilaMercado] consolidadas
+    ...                       # the user browses the market by hand
+    filas = sesion.detener()  # consolidated list[FilaMercado]
 """
 from __future__ import annotations
 
@@ -33,17 +33,17 @@ MAX_RECORTES_SESION = 200
 
 
 # --------------------------------------------------------------------------
-# Deduplicado de fotogramas
+# Frame deduplication
 # --------------------------------------------------------------------------
 class Deduplicador:
-    """Decide qué fotogramas merecen OCR.
+    """Decides which frames deserve OCR.
 
-    Compara una miniatura en gris de la región (lado mayor `lado` px):
-      - estable: casi igual que el fotograma ANTERIOR (no se está desplazando
-        la lista; evita leer imágenes movidas a medio scroll);
-      - nuevo: distinto del último fotograma PROCESADO (si no, es repetido).
-    Se usa el número de píxeles que cambian (no la media) para que un solo
-    precio distinto cuente como pantalla nueva.
+    Compares a grayscale thumbnail of the region (longest side `lado` px):
+      - stable: almost identical to the PREVIOUS frame (the list is not
+        scrolling; avoids reading blurry images mid-scroll);
+      - new: different from the last PROCESSED frame (otherwise it is a repeat).
+    The number of changed pixels (not the mean) is used so that a single
+    different price counts as a new screen.
     """
 
     def __init__(self, lado: int = 640, umbral_pixel: int = 40, min_pixeles: int = 6,
@@ -73,7 +73,7 @@ class Deduplicador:
         return cambiados >= self.min_pixeles
 
     def evaluar(self, img: Image.Image) -> bool:
-        """True si hay que hacer OCR de este fotograma."""
+        """True if this frame needs OCR."""
         self.vistos += 1
         m = self.miniatura(img)
         estable = not self.exigir_estable or (
@@ -89,10 +89,10 @@ class Deduplicador:
 
 
 # --------------------------------------------------------------------------
-# Procesado de una imagen
+# Processing a single image
 # --------------------------------------------------------------------------
 def configuracion_imagen(img: Image.Image, region=None, columnas=None, escala=None) -> dict:
-    """Mezcla la calibración guardada para el tamaño de la imagen con lo indicado."""
+    """Merges the saved calibration for the image size with what was passed in."""
     conf = calibracion.configuracion_para(img.width, img.height)
     if region is not None:
         conf["lista"] = list(region)
@@ -111,10 +111,10 @@ def _centro_y(p: dict) -> float:
 
 
 def _releer_incompletas(img, lineas, filas, region, idioma, max_filas=MAX_RELECTURAS):
-    """El OCR de Windows a veces se salta un número suelto en letra pequeña.
-    Para cada fila sin precio o sin cantidad se vuelve a leer SOLO esa franja,
-    a más escala, y si salen más números se sustituyen sus palabras.
-    Devuelve las líneas corregidas (o las originales si no cambia nada)."""
+    """Windows OCR sometimes skips a lone number in small print.
+    For each row without price or quantity, ONLY that strip is read again at a
+    higher scale, and if more numbers come out its words are replaced.
+    Returns the corrected lines (or the original ones if nothing changes)."""
     incompletas = [f for f in filas if f.get("caja") and (f["precio"] is None or f["cantidad"] is None)]
     if not incompletas:
         return lineas, False
@@ -156,8 +156,8 @@ def _releer_incompletas(img, lineas, filas, region, idioma, max_filas=MAX_RELECT
 
 def procesar_imagen(img: Image.Image, cat, region=None, columnas=None, escala=None,
                     idioma: str = "es-ES", releer: bool = True, faccion: str | None = None) -> list[dict]:
-    """OCR + parser de una imagen completa (pantalla, fotograma o captura).
-    `cat` puede ser un Catalogo, un dict o un parser.IndiceNombres ya construido."""
+    """OCR + parser of a whole image (screen, frame or screenshot).
+    `cat` can be a Catalogo, a dict or an already built parser.IndiceNombres."""
     indice = parser._indice(cat, faccion)
     conf = configuracion_imagen(img, region, columnas, escala)
     lineas = leer_imagen(img, region=tuple(conf["lista"]), idioma=idioma, escala=conf["escala"])
@@ -171,7 +171,7 @@ def procesar_imagen(img: Image.Image, cat, region=None, columnas=None, escala=No
 
 def guardar_recorte(img: Image.Image, fila: dict, carpeta: Path = DIR_REVISION,
                     margen: int = 6, max_ancho: int = 900) -> str | None:
-    """Guarda un recorte pequeño (PNG) de una fila dudosa y lo registra."""
+    """Saves a small crop (PNG) of a doubtful row and registers it."""
     caja = fila.get("caja")
     if not caja:
         return None
@@ -196,10 +196,10 @@ def guardar_recorte(img: Image.Image, fila: dict, carpeta: Path = DIR_REVISION,
 
 
 # --------------------------------------------------------------------------
-# Sesión de grabación
+# Recording session
 # --------------------------------------------------------------------------
 def _fuente_mss(indice_monitor: int):
-    """Devuelve una función que captura el monitor con mss (se crea en el hilo)."""
+    """Returns a function that captures the monitor with mss (created in the thread)."""
     import mss
 
     sct = mss.mss()
@@ -215,14 +215,14 @@ def _fuente_mss(indice_monitor: int):
 
 
 class SesionGrabacion:
-    """Captura la pantalla a `fps` en un hilo y acumula filas del mercado.
+    """Captures the screen at `fps` in a thread and accumulates market rows.
 
-    - `cat`: catálogo (o IndiceNombres) para emparejar nombres; `faccion`: la
-      del servidor ("elyos"|"asmodian") para desambiguar nombres repetidos.
-    - `region`/`columnas`: si no se dan, se usa la calibración de la resolución.
-    - `fuente`: función sin argumentos que devuelve un PIL.Image (para tests);
-      por defecto, mss sobre el monitor calibrado.
-    - `al_leer(filas)`: callback opcional tras cada fotograma procesado.
+    - `cat`: catalog (or IndiceNombres) for matching names; `faccion`: the
+      server's faction ("elyos"|"asmodian") to disambiguate repeated names.
+    - `region`/`columnas`: if not given, the resolution's calibration is used.
+    - `fuente`: argument-less function returning a PIL.Image (for tests);
+      by default, mss on the calibrated monitor.
+    - `al_leer(filas)`: optional callback after each processed frame.
     """
 
     def __init__(self, fps: float = 3, cat=None, region=None, columnas=None,
@@ -287,7 +287,7 @@ class SesionGrabacion:
             "error": str(self.error) if self.error else None,
         }
 
-    # -- hilo --
+    # -- thread --
     def _bucle(self):
         capturar = self._fuente
         cerrar = None
@@ -305,7 +305,7 @@ class SesionGrabacion:
                 espera = periodo - (time.monotonic() - t0)
                 if espera > 0:
                     self._parar.wait(espera)
-        except BaseException as e:  # noqa: BLE001 — se informa en detener()/estado()
+        except BaseException as e:  # noqa: BLE001 — reported in detener()/estado()
             self.error = e
         finally:
             if cerrar:
@@ -315,7 +315,7 @@ class SesionGrabacion:
                     pass
 
     def procesar(self, img: Image.Image) -> list[dict] | None:
-        """Procesa un fotograma (público para poder reutilizarlo y probarlo)."""
+        """Processes a frame (public so it can be reused and tested)."""
         conf = configuracion_imagen(img, self.region, self.columnas)
         x, y, w, h = conf["lista"]
         if not self.dedup.evaluar(img.crop((x, y, x + w, y + h))):
