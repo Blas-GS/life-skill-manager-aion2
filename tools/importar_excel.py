@@ -108,23 +108,12 @@ class Emparejador:
 
 
 def cargar_objetos() -> dict:
+    from app.catalogo import cargar_catalogo
+
     try:
-        from app.catalogo import cargar_catalogo
-
-        cat = cargar_catalogo()
-        for nombre in ("datos", "data", "raw"):
-            if isinstance(getattr(cat, nombre, None), dict):
-                return getattr(cat, nombre).get("objetos") or {}
-        if getattr(cat, "objetos", None):
-            return cat.objetos
-    except ModuleNotFoundError:
-        pass
-    import json
-
-    ruta = RAIZ / "data" / "catalogo.json"
-    if not ruta.exists():
-        raise SystemExit("data/catalogo.json does not exist: generate the catalog first (tools\\importar_metabot.py).")
-    return json.loads(ruta.read_text(encoding="utf-8")).get("objetos") or {}
+        return cargar_catalogo().objetos
+    except FileNotFoundError:
+        raise SystemExit("data/catalogo.json does not exist: generate the catalog first (tools\\importar_metabot.py).") from None
 
 
 def main(argv=None) -> int:
