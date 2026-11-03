@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from app.db import (
-    AJUSTES_POR_DEFECTO, Lectura, RepositorioLocal, RepositorioSupabase, ResultadoGuardado,
+    Lectura, RepositorioLocal, RepositorioSupabase, ResultadoGuardado,
     obtener_repositorio,
 )
 
@@ -253,7 +253,6 @@ def test_guardar_verificar_y_leer_lecturas(repo):
     hist = repo.historico(SRV, 610620013, T0 - timedelta(days=1))
     assert [h.precio_min for h in hist] == [100.0, 90.0]
     assert repo.historico(SRV, 610620013, T0 + timedelta(minutes=5))[0].id == a2.id
-    assert repo.historico(SRV, 610620013, T0, con_ofertas=False)[0].ofertas == []
 
     # saving the same thing twice doesn't duplicate it
     repo.guardar_lecturas([a1])
@@ -266,11 +265,9 @@ def test_lectura_invalida_no_se_guarda(repo):
 
 
 def test_ajustes_precios_npc_y_operaciones(repo):
-    assert repo.ajustes() == AJUSTES_POR_DEFECTO
+    assert repo.ajustes() == {}
     repo.guardar_ajustes({"rebaja_listado": 5, "combo_fallido": "conserva"})
-    aj = repo.ajustes()
-    assert aj["rebaja_listado"] == 5 and aj["combo_fallido"] == "conserva"
-    assert aj["impuesto_venta"] == 0.10
+    assert repo.ajustes() == {"rebaja_listado": 5, "combo_fallido": "conserva"}
 
     repo.guardar_precio_npc(610620013, 120)
     repo.guardar_precio_npc(610620013, 150.5)
@@ -279,23 +276,11 @@ def test_ajustes_precios_npc_y_operaciones(repo):
     p = repo.guardar_perfil({"nombre": "Blas", "servidor_id": SRV})
     op = repo.registrar_operacion(p["id"], "venta", 610710001, 3, 9000, T0)
     assert op["id"] and op["precio"] == 9000.0
-    assert [o["tipo"] for o in repo.operaciones(p["id"])] == ["venta"]
+    guardadas = (repo._filas("select tipo from operaciones where perfil_id = ?", [p["id"]]) if repo.backend == "local"
+                 else repo._get("operaciones", [("select", "tipo"), ("perfil_id", f"eq.{p['id']}")]))
+    assert [o["tipo"] for o in guardadas] == ["venta"]
     with pytest.raises(ValueError):
         repo.registrar_operacion(p["id"], "regalo", 1, 1, 1, T0)
-
-
-def test_sincronizar_catalogo(repo):
-    datos = {
-        "objetos": {"610620013": {"nombre": "Mineral de orichalcum", "grado": "common"}},
-        "curvas": {"c9": [95.2, 95.4]},
-        "recetas": [{"id": 115016001, "faccion": "elyos", "profesion": "herreria", "nivel": 1,
-                     "producto": 610710001, "cantidad": 1,
-                     "ingredientes": [[610620013, 2], [630541001, 1]], "curva": "c9",
-                     "combo_pct": 0}],
-    }
-    assert repo.sincronizar_catalogo(datos) == {"objetos": 1, "curvas": 1, "recetas": 1,
-                                                "receta_ingredientes": 2}
-    assert repo.sincronizar_catalogo(datos)["receta_ingredientes"] == 2   # repeatable
 
 
 def test_local_vistas_sqlite(local):
@@ -395,7 +380,7 @@ def test_rechazo_de_supabase_se_conserva_con_el_error(supa, falso):
 
     # the rejected entry doesn't block the others... unless it is rejected too
     assert supa.subir_pendientes() == 0
-    pend = supa.pendientes()
+    pend = supa._leer_cola()
     assert len(pend) == 2 and all(p["intentos"] == 1 and "409" in p["error"] for p in pend)
 
     falso.rechazar_tablas = set()

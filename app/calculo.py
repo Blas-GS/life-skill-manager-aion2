@@ -5,7 +5,7 @@ Public interface:
     analizar_receta(receta, cat, precios, ajustes, nivel, inventario=None, intentos=1, ...) -> dict
     mejores_oportunidades(cat, precios, ajustes, niveles, faccion, inventario=None, filtros=None, ...) -> list[dict]
 
-`cat` can be the raw dict from data/catalogo.json or a Catalogo object (app/catalogo.py).
+`cat` is a Catalogo (app/catalogo.py).
 `precios` is {objeto_id: InfoPrecio}; InfoPrecio can be a dict or a Lectura
 (fields precio_min, ofertas, fecha, cantidad_total, num_anuncios; optional precio_npc, volumen_dia).
 All probabilities are returned as fractions (0–1); the catalog curves are in %.
@@ -45,87 +45,26 @@ def ajustes_completos(ajustes=None) -> dict:
     return resultado
 
 
-# --- catalog -----------------------------------------------------------------
-
-class _Cat:
-    """Adapter: accepts the catalogo.json dict or a Catalogo object."""
-
-    def __init__(self, cat):
-        self._cat = cat
-        raw = cat if isinstance(cat, dict) else None
-        if raw is None:
-            for nombre in ("datos", "data", "raw"):
-                candidato = getattr(cat, nombre, None)
-                if isinstance(candidato, dict):
-                    raw = candidato
-                    break
-        if raw is not None:
-            self.objetos = raw.get("objetos", {}) or {}
-            self.curvas = raw.get("curvas", {}) or {}
-            recetas = raw.get("recetas", []) or []
-        else:
-            self.objetos = getattr(cat, "objetos", None) or {}
-            self.curvas = getattr(cat, "curvas", None) or {}
-            recetas = getattr(cat, "recetas", None)
-            if recetas is None or callable(recetas):
-                vistas, recetas = set(), []
-                for faccion in ("elyos", "asmodian"):
-                    for r in cat.recetas_de(faccion):
-                        if r["id"] not in vistas:
-                            vistas.add(r["id"])
-                            recetas.append(r)
-        self.recetas = list(recetas)
-        self._productores = {}
-        self._ingredientes = set()
-        for r in self.recetas:
-            self._productores.setdefault(int(r["producto"]), []).append(r)
-            for ing, _ in r.get("ingredientes", []):
-                self._ingredientes.add(int(ing))
-
-    def objeto(self, oid) -> dict:
-        obj = self.objetos.get(str(oid)) or self.objetos.get(oid)
-        if obj is None and not isinstance(self._cat, dict) and hasattr(self._cat, "objeto"):
-            try:
-                obj = self._cat.objeto(oid)
-            except Exception:
-                obj = None
-        return obj or {}
-
-    def nombre(self, oid) -> str:
-        return self.objeto(oid).get("nombre") or str(oid)
-
-    def recetas_que_producen(self, oid) -> list:
-        return self._productores.get(int(oid), [])
-
-    def recetas_de(self, faccion) -> list:
-        if faccion is None:
-            return list(self.recetas)
-        return [r for r in self.recetas if r.get("faccion") in (faccion, "ambas", None)]
-
-    def es_intermedio(self, oid) -> bool:
-        return int(oid) in self._ingredientes
-
-    def valor_curva(self, curva, indice):
-        """Probability (0–1) of the curve at the index, clamped to the last value.
-        Returns (prob, known)."""
-        if curva is None:
-            return 1.0, True
-        valores = curva if isinstance(curva, (list, tuple)) else self.curvas.get(curva)
-        if not valores:
-            return 1.0, False
-        return float(valores[min(max(indice, 0), len(valores) - 1)]) / 100.0, True
+def _valor_curva(cat, curva, indice):
+    """Probability (0–1) of the curve at the index, clamped to the last value.
+    Returns (prob, known)."""
+    if curva is None:
+        return 1.0, True
+    valores = cat.curvas.get(curva)
+    if not valores:
+        return 1.0, False
+    return float(valores[min(max(indice, 0), len(valores) - 1)]) / 100.0, True
 
 
 # --- probabilities -----------------------------------------------------------
 
 def probabilidades(receta, nivel, cat, ajustes=None) -> dict:
     """P(success), combos and expected units per attempt of each product."""
-    cat = cat if isinstance(cat, _Cat) else _Cat(cat)
     aj = ajustes_completos(ajustes)
     diferencia = int(nivel) - int(receta.get("nivel") or 1)
-    p, curva_ok = cat.valor_curva(receta.get("curva"), diferencia)
+    p, curva_ok = _valor_curva(cat, receta.get("curva"), diferencia)
     combo_pct = float(receta.get("combo_pct") or 0) / 100.0
-    p_combo_curva, combo_ok = (cat.valor_curva(receta.get("curva_combo"), diferencia)
+    p_combo_curva, combo_ok = (_valor_curva(cat, receta.get("curva_combo"), diferencia)
                                if combo_pct > 0 else (0.0, True))
     p_simple = p * (1 - combo_pct)
     p_combo = p * combo_pct * p_combo_curva
@@ -163,7 +102,7 @@ def probabilidades(receta, nivel, cat, ajustes=None) -> dict:
 
 class _Contexto:
     def __init__(self, cat, precios, ajustes, niveles, faccion=None, precios_npc=None, ahora=None):
-        self.cat = cat if isinstance(cat, _Cat) else _Cat(cat)
+        self.cat = cat
         self.precios = precios or {}
         self.aj = ajustes_completos(ajustes)
         self.niveles = dict(niveles or {})
@@ -184,7 +123,7 @@ class _Contexto:
         if valor is None:
             valor = campo(self.info(oid), "precio_npc")
         if valor is None:
-            valor = self.cat.objeto(oid).get("precio_npc")
+            valor = (self.cat.objeto(oid) or {}).get("precio_npc")
         return float(valor) if valor is not None and float(valor) > 0 else None
 
     def nivel(self, profesion):

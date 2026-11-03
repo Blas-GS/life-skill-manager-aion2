@@ -6,6 +6,7 @@ import pytest
 
 from app.calculo import (analizar_receta, coste_adquisicion, mejores_oportunidades,
                          probabilidades)
+from app.catalogo import Catalogo
 
 FIXTURE = Path(__file__).parent / "fixtures" / "catalogo_mini.json"
 AHORA = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
@@ -17,11 +18,11 @@ OKRA, CARNE, ACEITE, OKRA_FRITA, ESTOFADO = 620100001, 620100002, 620100003, 620
 
 @pytest.fixture(scope="module")
 def cat():
-    return json.loads(FIXTURE.read_text(encoding="utf-8"))
+    return Catalogo(json.loads(FIXTURE.read_text(encoding="utf-8")))
 
 
 def receta(cat, rid):
-    return next(r for r in cat["recetas"] if r["id"] == rid)
+    return cat.receta(rid)
 
 
 def info(precio, ofertas=None, horas=1, cantidad_total=None, num_anuncios=None):
@@ -129,12 +130,12 @@ def test_inventario_valorado_a_cero_o_mercado(cat):
 
 
 def test_ciclos_no_cuelgan():
-    cat = {"objetos": {"1": {"nombre": "A"}, "2": {"nombre": "B"}}, "curvas": {},
+    cat = Catalogo({"objetos": {"1": {"nombre": "A"}, "2": {"nombre": "B"}}, "curvas": {},
            "recetas": [
                {"id": 1, "faccion": "ambas", "profesion": "alquimia", "nivel": 1, "producto": 1,
                 "cantidad": 1, "ingredientes": [[2, 1]], "curva": None, "combo_pct": 0},
                {"id": 2, "faccion": "ambas", "profesion": "alquimia", "nivel": 1, "producto": 2,
-                "cantidad": 1, "ingredientes": [[1, 1]], "curva": None, "combo_pct": 0}]}
+                "cantidad": 1, "ingredientes": [[1, 1]], "curva": None, "combo_pct": 0}]})
     assert coste_adquisicion(1, cat, {}) == (None, None, None)
     assert coste_adquisicion(1, cat, {2: {"precio_min": 10}}) == (10, "fabricar", 1)
 

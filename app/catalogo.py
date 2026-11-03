@@ -4,12 +4,11 @@ Interface:
     cat = cargar_catalogo()
     cat.objeto(id) -> dict | None
     cat.nombre(id) -> str
+    cat.receta(id) -> dict | None
     cat.recetas_de(faccion) -> list[dict]
-    cat.recetas_que_producen(id) -> list[dict]
-    cat.buscar(texto, limite=10) -> list[(id, nombre, puntuacion)]
-
-Extras (compatible with the contract): `buscar(..., faccion=...)`, `receta(id)`,
-`recetas_que_usan(id)`, `prob_exito(receta, nivel)`, `prob_combo(receta, nivel)`.
+    cat.recetas_que_producen(id, con_combo=False) -> list[dict]
+    cat.es_intermedio(id) -> bool
+    cat.buscar(texto, limite=10, faccion=None) -> list[(id, nombre, puntuacion)]
 """
 from __future__ import annotations
 
@@ -53,15 +52,18 @@ class Catalogo:
         self.recetas: list[dict] = datos["recetas"]
         self.curvas: dict[str, list[float]] = datos.get("curvas", {})
         self.profesiones: dict[str, str] = datos.get("profesiones", {})
-        self.version_cliente: str | None = datos.get("version_cliente")
+        self.meta = {k: datos.get(k) for k in ("fuente", "version_cliente", "generado")}
 
         self._recetas_por_id = {r["id"]: r for r in self.recetas}
         self._por_producto: dict[int, list[dict]] = {}
-        self._por_ingrediente: dict[int, list[dict]] = {}
+        self._con_combo: dict[int, list[dict]] = {}  # also recipes whose combo yields the item
+        self._ingredientes: set[int] = set()
         for r in self.recetas:
             self._por_producto.setdefault(r["producto"], []).append(r)
-            for ing, _ in r["ingredientes"]:
-                self._por_ingrediente.setdefault(ing, []).append(r)
+            self._con_combo.setdefault(r["producto"], []).append(r)
+            if r.get("producto_combo"):
+                self._con_combo.setdefault(r["producto_combo"], []).append(r)
+            self._ingredientes.update(ing for ing, _ in r["ingredientes"])
 
         # search index: one entry per (id, normalized ES/EN name)
         self._claves: list[tuple[int, str]] = []
@@ -92,38 +94,17 @@ class Catalogo:
             return list(self.recetas)
         return [r for r in self.recetas if r["faccion"] in (f, "ambas")]
 
-    def recetas_que_producen(self, id) -> list[dict]:
-        return list(self._por_producto.get(int(id), []))
+    def recetas_que_producen(self, id, con_combo: bool = False) -> list[dict]:
+        """Recipes whose main product is `id` (with `con_combo`, also those whose combo yields it).
+        The returned list is shared: do not modify it."""
+        return (self._con_combo if con_combo else self._por_producto).get(int(id), [])
 
-    def recetas_que_usan(self, id) -> list[dict]:
-        return list(self._por_ingrediente.get(int(id), []))
+    def es_intermedio(self, id) -> bool:
+        """True if the item is an ingredient of some recipe."""
+        return int(id) in self._ingredientes
 
-    # --- probabilities -----------------------------------------------------
-    def _valor_curva(self, curva: str | None, diferencia: int) -> float | None:
-        if diferencia < 0:
-            return None  # recipe locked
-        if not curva:
-            return 1.0
-        valores = self.curvas.get(curva)
-        if not valores:
-            return 1.0
-        return valores[min(diferencia, len(valores) - 1)] / 100.0
-
-    def prob_exito(self, receta: dict, nivel: int) -> float | None:
-        """Success probability (0–1) at mastery `nivel`; None if the recipe is locked.
-        Curve index = nivel − nivel_receta, clamped to the last value."""
-        return self._valor_curva(receta.get("curva"), nivel - receta.get("nivel", 0))
-
-    def prob_combo(self, receta: dict, nivel: int) -> float:
-        """Probability that a craft ends in a combo result:
-        normal success × combo_pct × success of the combo craft."""
-        if not receta.get("combo_pct"):
-            return 0.0
-        exito = self.prob_exito(receta, nivel)
-        if exito is None:
-            return 0.0
-        exito_combo = self._valor_curva(receta.get("curva_combo"), nivel - receta.get("nivel", 0)) or 0.0
-        return exito * receta["combo_pct"] / 100.0 * exito_combo
+    def nombre_profesion(self, clave) -> str:
+        return self.profesiones.get(clave) or str(clave or "")
 
     # --- search ------------------------------------------------------------
     def buscar(self, texto: str, limite: int = 10, faccion: str | None = None) -> list[tuple[int, str, float]]:

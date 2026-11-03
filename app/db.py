@@ -36,15 +36,6 @@ RAIZ = Path(__file__).resolve().parent.parent
 RUTA_DATOS = RAIZ / "data"
 RUTA_ENV = RAIZ / ".env"
 
-AJUSTES_POR_DEFECTO: dict[str, Any] = {
-    "comision_registro": 0.02,
-    "impuesto_venta": 0.10,
-    "rebaja_listado": 1,
-    "combo_fallido": "pierde_todo",
-    "valorar_inventario": "mercado",
-    "tope_tmp_mb": 500,
-}
-
 FUENTES = {"grabacion", "video", "captura", "manual", "excel"}
 FACCIONES = {"elyos", "asmodian"}
 TIPOS_OPERACION = {"venta", "compra"}
@@ -55,7 +46,6 @@ _COLS_LECTURA = (
     "id", "servidor_id", "objeto_id", "fecha", "precio_min", "cantidad_total",
     "num_anuncios", "n_ofertas", "fuente", "sesion_id",
 )
-_COLS_OPERACION = ("id", "perfil_id", "tipo", "objeto_id", "cantidad", "precio", "fecha")
 
 
 # ---------------------------------------------------------------------------
@@ -235,46 +225,30 @@ class _RepositorioBase:
         }
 
     @staticmethod
-    def _filas_catalogo(datos: dict) -> dict[str, list[dict]]:
-        objetos = [{
-            "id": int(k),
-            "nombre": v.get("nombre") or v.get("nombre_en") or str(k),
-            "nombre_en": v.get("nombre_en"),
-            "grado": v.get("grado"),
-            "icono": v.get("icono"),
-            "comerciable": v.get("comerciable"),
-            "vinculado": v.get("vinculado"),
-            "precio_npc": v.get("precio_npc"),
-            "slug": v.get("slug"),
-        } for k, v in (datos.get("objetos") or {}).items()]
-        curvas = [{"id": str(k), "valores": list(v)} for k, v in (datos.get("curvas") or {}).items()]
-        recetas, ingredientes = [], []
-        for r in datos.get("recetas") or []:
-            recetas.append({
-                "id": int(r["id"]),
-                "faccion": r.get("faccion") or "ambas",
-                "profesion": r["profesion"],
-                "nivel": int(r.get("nivel") or 0),
-                "producto": int(r["producto"]),
-                "cantidad": int(r.get("cantidad") or 1),
-                "curva": r.get("curva"),
-                "combo_pct": float(r.get("combo_pct") or 0),
-                "curva_combo": r.get("curva_combo"),
-                "producto_combo": _num(r.get("producto_combo"), int),
-                "cantidad_combo": _num(r.get("cantidad_combo"), int),
-            })
-            ingredientes.extend({"receta_id": int(r["id"]), "posicion": i,
-                                 "objeto_id": int(o), "cantidad": int(c)}
-                                for i, (o, c) in enumerate(r.get("ingredientes") or []))
-        return {"objetos": objetos, "curvas": curvas, "recetas": recetas,
-                "receta_ingredientes": ingredientes}
+    def _faltan_ofertas(ids: list[str], esperadas: dict[str, int], reales: dict[str, int]) -> bool:
+        """True if any reading is missing or does not have all its offers."""
+        return any(i not in esperadas or reales.get(i, 0) != esperadas[i] for i in ids)
 
-    @staticmethod
-    def _sumar_inventario(detalle: list[dict]) -> dict[int, int]:
+    # --- shared by both backends --------------------------------------------
+    def guardar_servidor(self, datos: dict) -> dict:
+        return self._guardar_por_id("servidores", _COLS_SERVIDOR, self._normalizar_servidor(datos))
+
+    def guardar_perfil(self, datos: dict) -> dict:
+        return self._guardar_por_id("perfiles", _COLS_PERFIL, self._normalizar_perfil(datos))
+
+    def inventario(self, perfil_id: str) -> dict[int, int]:
+        """Units per item, adding up inventory and warehouse."""
         total: dict[int, int] = {}
-        for f in detalle:
+        for f in self.inventario_detalle(perfil_id):
             total[int(f["objeto_id"])] = total.get(int(f["objeto_id"]), 0) + int(f["cantidad"])
         return {k: v for k, v in total.items() if v > 0}
+
+    def _a_lecturas(self, filas: list[dict]) -> list[Lectura]:
+        ofertas = self._ofertas_de([str(f["id"]) for f in filas])
+        return [_lectura_de_fila(f, ofertas.get(str(f["id"]), [])) for f in filas]
+
+    def _por_objeto(self, filas: list[dict]) -> dict[int, Lectura]:
+        return {lec.objeto_id: lec for lec in self._a_lecturas(filas)}
 
     # --- defaults (overridden by Supabase) --------------------------------
     def subir_pendientes(self) -> int:
@@ -316,19 +290,6 @@ create table if not exists inventario (
     objeto_id integer not null, ubicacion text not null default 'inventario',
     cantidad integer not null check (cantidad >= 0), actualizado text,
     primary key (perfil_id, objeto_id, ubicacion));
-create table if not exists objetos (
-    id integer primary key, nombre text not null, nombre_en text, grado text, icono text,
-    comerciable integer, vinculado integer, precio_npc real, slug text);
-create table if not exists curvas (id text primary key, valores text not null);
-create table if not exists recetas (
-    id integer primary key, faccion text not null, profesion text not null,
-    nivel integer not null, producto integer not null, cantidad integer not null default 1,
-    curva text, combo_pct real not null default 0, curva_combo text,
-    producto_combo integer, cantidad_combo integer);
-create table if not exists receta_ingredientes (
-    receta_id integer not null references recetas (id) on delete cascade,
-    posicion integer not null, objeto_id integer not null, cantidad integer not null,
-    primary key (receta_id, posicion));
 create table if not exists lecturas_mercado (
     id text primary key,
     servidor_id text not null references servidores (id) on update cascade,
@@ -429,14 +390,8 @@ class RepositorioLocal(_RepositorioBase):
             self._upsert(con, tabla, fila, ("id",))
         return self._filas(sql, [fila["id"]])[0]
 
-    def guardar_servidor(self, datos: dict) -> dict:
-        return self._guardar_por_id("servidores", _COLS_SERVIDOR, self._normalizar_servidor(datos))
-
     def listar_perfiles(self) -> list[dict]:
         return self._filas(f"select {', '.join(_COLS_PERFIL)} from perfiles order by nombre")
-
-    def guardar_perfil(self, datos: dict) -> dict:
-        return self._guardar_por_id("perfiles", _COLS_PERFIL, self._normalizar_perfil(datos))
 
     def niveles(self, perfil_id: str) -> dict[str, int]:
         return {f["profesion"]: int(f["nivel"]) for f in self._filas(
@@ -447,9 +402,6 @@ class RepositorioLocal(_RepositorioBase):
             self._upsert(con, "niveles", {"perfil_id": perfil_id, "profesion": profesion,
                                           "nivel": int(nivel), "actualizado": _ahora()},
                          ("perfil_id", "profesion"))
-
-    def inventario(self, perfil_id: str) -> dict[int, int]:
-        return self._sumar_inventario(self.inventario_detalle(perfil_id))
 
     def inventario_detalle(self, perfil_id: str) -> list[dict]:
         return self._filas("select objeto_id, cantidad, ubicacion from inventario "
@@ -501,30 +453,20 @@ class RepositorioLocal(_RepositorioBase):
             reales = {f["lectura_id"]: f["n"] for f in self._filas(
                 f"select lectura_id, count(*) as n from ofertas where lectura_id in ({marcas}) "
                 f"group by lectura_id", trozo)}
-            for i in trozo:
-                if i not in esperadas or reales.get(i, 0) != esperadas[i]:
-                    return False
+            if self._faltan_ofertas(trozo, esperadas, reales):
+                return False
         return True
 
-    def _a_lecturas(self, filas: list[dict]) -> list[Lectura]:
-        ofertas = self._ofertas_de([f["id"] for f in filas])
-        return [_lectura_de_fila(f, ofertas.get(f["id"], [])) for f in filas]
-
     def ultimas_lecturas(self, servidor_id: str) -> dict[int, Lectura]:
-        filas = self._filas("select * from ultima_lectura where servidor_id = ?", [servidor_id])
-        return {lec.objeto_id: lec for lec in self._a_lecturas(filas)}
+        return self._por_objeto(self._filas("select * from ultima_lectura where servidor_id = ?", [servidor_id]))
 
-    def historico(self, servidor_id: str, objeto_id: int, desde: datetime | None = None,
-                  con_ofertas: bool = True) -> list[Lectura]:
+    def historico(self, servidor_id: str, objeto_id: int, desde: datetime | None = None) -> list[Lectura]:
         sql = "select * from lecturas_mercado where servidor_id = ? and objeto_id = ?"
         params: list = [servidor_id, int(objeto_id)]
         if desde is not None:
             sql += " and fecha >= ?"
             params.append(_iso(desde))
-        filas = self._filas(sql + " order by fecha, creado", params)
-        if not con_ofertas:
-            return [_lectura_de_fila(f, []) for f in filas]
-        return self._a_lecturas(filas)
+        return self._a_lecturas(self._filas(sql + " order by fecha, creado", params))
 
     # --- other -----------------------------------------------------------------
     def precios_npc(self) -> dict[int, float]:
@@ -541,10 +483,9 @@ class RepositorioLocal(_RepositorioBase):
                              ("objeto_id",))
 
     def ajustes(self) -> dict:
-        datos = dict(AJUSTES_POR_DEFECTO)
-        for f in self._filas("select clave, valor from ajustes"):
-            datos[f["clave"]] = json.loads(f["valor"]) if f["valor"] is not None else None
-        return datos
+        """Saved settings (the defaults live in app/servicios.py)."""
+        return {f["clave"]: json.loads(f["valor"]) if f["valor"] is not None else None
+                for f in self._filas("select clave, valor from ajustes")}
 
     def guardar_ajustes(self, datos: dict) -> None:
         with self._con() as con:
@@ -557,33 +498,6 @@ class RepositorioLocal(_RepositorioBase):
         with self._con() as con:
             self._upsert(con, "operaciones", fila, ("id",))
         return fila
-
-    def operaciones(self, perfil_id: str | None = None, desde: datetime | None = None) -> list[dict]:
-        sql, params = f"select {', '.join(_COLS_OPERACION)} from operaciones where 1 = 1", []
-        if perfil_id is not None:
-            sql += " and perfil_id = ?"
-            params.append(perfil_id)
-        if desde is not None:
-            sql += " and fecha >= ?"
-            params.append(_iso(desde))
-        return self._filas(sql + " order by fecha", params)
-
-    def sincronizar_catalogo(self, datos: dict) -> dict[str, int]:
-        """Copies data/catalogo.json (already loaded as a dict) to the catalog tables."""
-        tablas = self._filas_catalogo(datos)
-        with self._con() as con:
-            for f in tablas["objetos"]:
-                self._upsert(con, "objetos", f, ("id",))
-            for f in tablas["curvas"]:
-                self._upsert(con, "curvas", {**f, "valores": json.dumps(f["valores"])}, ("id",))
-            for f in tablas["recetas"]:
-                self._upsert(con, "recetas", f, ("id",))
-            con.execute("delete from receta_ingredientes")
-            con.executemany(
-                "insert into receta_ingredientes (receta_id, posicion, objeto_id, cantidad) "
-                "values (:receta_id, :posicion, :objeto_id, :cantidad)",
-                tablas["receta_ingredientes"])
-        return {k: len(v) for k, v in tablas.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -689,14 +603,8 @@ class RepositorioSupabase(_RepositorioBase):
         res = self._insertar(tabla, [fila], "id", devolver=True)
         return {k: res[0].get(k) for k in cols}
 
-    def guardar_servidor(self, datos: dict) -> dict:
-        return self._guardar_por_id("servidores", _COLS_SERVIDOR, self._normalizar_servidor(datos))
-
     def listar_perfiles(self) -> list[dict]:
         return self._get("perfiles", [("select", ",".join(_COLS_PERFIL)), ("order", "nombre")])
-
-    def guardar_perfil(self, datos: dict) -> dict:
-        return self._guardar_por_id("perfiles", _COLS_PERFIL, self._normalizar_perfil(datos))
 
     def niveles(self, perfil_id: str) -> dict[str, int]:
         return {f["profesion"]: int(f["nivel"]) for f in self._get(
@@ -707,9 +615,6 @@ class RepositorioSupabase(_RepositorioBase):
         self._insertar("niveles", [{"perfil_id": perfil_id, "profesion": profesion,
                                     "nivel": int(nivel), "actualizado": _ahora()}],
                        "perfil_id,profesion")
-
-    def inventario(self, perfil_id: str) -> dict[int, int]:
-        return self._sumar_inventario(self.inventario_detalle(perfil_id))
 
     def inventario_detalle(self, perfil_id: str) -> list[dict]:
         return self._get("inventario", [("select", "objeto_id,cantidad,ubicacion"),
@@ -778,40 +683,31 @@ class RepositorioSupabase(_RepositorioBase):
                                                ("lectura_id", self._en(trozo)),
                                                ("order", "lectura_id,posicion")]):
                     reales[str(f["lectura_id"])] = reales.get(str(f["lectura_id"]), 0) + 1
-                for i in trozo:
-                    if i not in esperadas or reales.get(i, 0) != esperadas[i]:
-                        return False
+                if self._faltan_ofertas(trozo, esperadas, reales):
+                    return False
         except ErrorBaseDatos as e:
             log.warning("Could not verify the readings: %s", e)
             return False
         return True
 
-    def _a_lecturas(self, filas: list[dict]) -> list[Lectura]:
-        ids = [str(f["id"]) for f in filas]
-        ofertas_filas: list[dict] = []
+    def _ofertas_de(self, ids: list[str]) -> dict[str, list[tuple[float, int]]]:
+        filas: list[dict] = []
         for trozo in _trozos(ids, self.TAM_IN):
-            ofertas_filas += self._get("ofertas", [
-                ("select", "lectura_id,posicion,precio,cantidad"),
-                ("lectura_id", self._en(trozo)), ("order", "lectura_id,posicion")])
-        ofertas = _agrupar_ofertas(ofertas_filas)
-        return [_lectura_de_fila(f, ofertas.get(str(f["id"]), [])) for f in filas]
+            filas += self._get("ofertas", [("select", "lectura_id,posicion,precio,cantidad"),
+                                           ("lectura_id", self._en(trozo)), ("order", "lectura_id,posicion")])
+        return _agrupar_ofertas(filas)
 
     def ultimas_lecturas(self, servidor_id: str) -> dict[int, Lectura]:
-        filas = self._get("ultima_lectura", [("select", ",".join(_COLS_LECTURA)),
-                                             ("servidor_id", f"eq.{servidor_id}"),
-                                             ("order", "objeto_id")])
-        return {lec.objeto_id: lec for lec in self._a_lecturas(filas)}
+        return self._por_objeto(self._get("ultima_lectura", [("select", ",".join(_COLS_LECTURA)),
+                                                             ("servidor_id", f"eq.{servidor_id}"),
+                                                             ("order", "objeto_id")]))
 
-    def historico(self, servidor_id: str, objeto_id: int, desde: datetime | None = None,
-                  con_ofertas: bool = True) -> list[Lectura]:
+    def historico(self, servidor_id: str, objeto_id: int, desde: datetime | None = None) -> list[Lectura]:
         params = [("select", ",".join(_COLS_LECTURA)), ("servidor_id", f"eq.{servidor_id}"),
                   ("objeto_id", f"eq.{int(objeto_id)}"), ("order", "fecha.asc,id.asc")]
         if desde is not None:
             params.append(("fecha", f"gte.{_iso(desde)}"))
-        filas = self._get("lecturas_mercado", params)
-        if not con_ofertas:
-            return [_lectura_de_fila(f, []) for f in filas]
-        return self._a_lecturas(filas)
+        return self._a_lecturas(self._get("lecturas_mercado", params))
 
     # --- offline queue ---------------------------------------------------------
     def _leer_cola(self) -> list[dict]:
@@ -860,14 +756,6 @@ class RepositorioSupabase(_RepositorioBase):
         """Number of readings/operations waiting in the local queue."""
         with self._candado:
             return sum(len(e.get("filas", [])) for e in self._leer_cola())
-
-    def pendientes(self) -> list[dict]:
-        """Queue summary (to show in the dashboard)."""
-        with self._candado:
-            return [{"cola_id": e["cola_id"], "tipo": e.get("tipo"),
-                     "filas": len(e.get("filas", [])), "encolado": e.get("encolado"),
-                     "intentos": e.get("intentos", 0), "error": e.get("error")}
-                    for e in self._leer_cola()]
 
     def _procesar_entrada(self, e: dict) -> None:
         if e.get("tipo") == "lecturas":
@@ -923,10 +811,7 @@ class RepositorioSupabase(_RepositorioBase):
                                             "actualizado": _ahora()}], "objeto_id")
 
     def ajustes(self) -> dict:
-        datos = dict(AJUSTES_POR_DEFECTO)
-        for f in self._get("ajustes", [("select", "clave,valor"), ("order", "clave")]):
-            datos[f["clave"]] = f["valor"]
-        return datos
+        return {f["clave"]: f["valor"] for f in self._get("ajustes", [("select", "clave,valor"), ("order", "clave")])}
 
     def guardar_ajustes(self, datos: dict) -> None:
         filas = [{"clave": str(k), "valor": v, "actualizado": _ahora()} for k, v in datos.items()]
@@ -942,24 +827,6 @@ class RepositorioSupabase(_RepositorioBase):
             self._encolar({"tipo": "operacion", "filas": [fila], "error": str(e)})
             return {**fila, "en_cola": True}
         return fila
-
-    def operaciones(self, perfil_id: str | None = None, desde: datetime | None = None) -> list[dict]:
-        params = [("select", ",".join(_COLS_OPERACION)), ("order", "fecha.asc,id.asc")]
-        if perfil_id is not None:
-            params.append(("perfil_id", f"eq.{perfil_id}"))
-        if desde is not None:
-            params.append(("fecha", f"gte.{_iso(desde)}"))
-        return self._get("operaciones", params)
-
-    def sincronizar_catalogo(self, datos: dict) -> dict[str, int]:
-        """Copies data/catalogo.json (already loaded as a dict) to the catalog tables."""
-        tablas = self._filas_catalogo(datos)
-        self._insertar("objetos", tablas["objetos"], "id")
-        self._insertar("curvas", tablas["curvas"], "id")
-        self._insertar("recetas", tablas["recetas"], "id")
-        self._borrar("receta_ingredientes", [("receta_id", "not.is.null")])
-        self._insertar("receta_ingredientes", tablas["receta_ingredientes"], "receta_id,posicion")
-        return {k: len(v) for k, v in tablas.items()}
 
 
 # ---------------------------------------------------------------------------
