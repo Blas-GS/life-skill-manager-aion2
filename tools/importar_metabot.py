@@ -1,27 +1,27 @@
-"""Importa el catálogo de recetas de AION 2 desde metabot.gg y genera data/catalogo.json.
+"""Imports the AION 2 recipe catalog from metabot.gg and generates data/catalogo.json.
 
-Fuente de datos: https://metabot.gg/es_ES/aion-2/crafting (atribución pedida en
-https://metabot.gg/llms.txt). La página incrusta en el payload de Next.js
-(`self.__next_f`) un objeto con `recipes`, `items`, `gather`, `curves` y `maxMastery`.
+Data source: https://metabot.gg/es_ES/aion-2/crafting (attribution requested at
+https://metabot.gg/llms.txt). The page embeds in its Next.js payload
+(`self.__next_f`) an object with `recipes`, `items`, `gather`, `curves` and `maxMastery`.
 
-Uso:
-    .\\.venv\\Scripts\\python.exe tools\\importar_metabot.py              # recetas + páginas de ingredientes
-    .\\.venv\\Scripts\\python.exe tools\\importar_metabot.py --productos  # además páginas de productos (comerciable)
-    .\\.venv\\Scripts\\python.exe tools\\importar_metabot.py --sin-objetos  # solo recetas (sin páginas de objeto)
-    .\\.venv\\Scripts\\python.exe tools\\importar_metabot.py --refrescar  # ignora la caché
+Usage:
+    .\\.venv\\Scripts\\python.exe tools\\importar_metabot.py              # recipes + ingredient pages
+    .\\.venv\\Scripts\\python.exe tools\\importar_metabot.py --productos  # also product pages (tradeable)
+    .\\.venv\\Scripts\\python.exe tools\\importar_metabot.py --sin-objetos  # recipes only (no item pages)
+    .\\.venv\\Scripts\\python.exe tools\\importar_metabot.py --refrescar  # ignore the cache
 
-Todas las descargas se guardan comprimidas en data/cache_metabot/ y no se repiten.
+All downloads are stored compressed in data/cache_metabot/ and are not repeated.
 
-Decisiones (ver también "notas" dentro del catálogo):
-- Facción: 2º dígito del id de receta. 1 = Elyos, 2 = Asmodian. Verificado contra las
-  etiquetas "Elyos"/"Asmodianos" de las tablas de metabot y contra ingredientes de facción.
-  Las recetas espejo se mantienen por separado (no se usa "ambas") porque sus productos
-  tienen ids distintos por facción.
-- Combo: metabot no publica el producto del combo. Para equipo se infiere la versión
-  "brillante" (EN "Splendent") del producto, que existe como objeto sin receta normal.
-  Para comida, pociones y piedras no se puede saber → null.
-- Recetas con maestría 0 (sin curva propia): metabot las etiqueta "Mejora"/"Upgrade";
-  se guardan con nivel 0 y "tipo": "mejora".
+Decisions (see also "notas" inside the catalog):
+- Faction: 2nd digit of the recipe id. 1 = Elyos, 2 = Asmodian. Verified against the
+  "Elyos"/"Asmodianos" labels in metabot's tables and against faction ingredients.
+  Mirror recipes are kept separate ("ambas" is not used) because their products
+  have different ids per faction.
+- Combo: metabot doesn't publish the combo product. For equipment the "brillante"
+  (EN "Splendent") version of the product is inferred; it exists as an item without
+  a normal recipe. For food, potions and stones it cannot be known → null.
+- Recipes with mastery 0 (no curve of their own): metabot labels them "Mejora"/"Upgrade";
+  they are saved with nivel 0 and "tipo": "mejora".
 """
 from __future__ import annotations
 
@@ -47,8 +47,8 @@ URL_CRAFTEO = {"es": f"{BASE}/es_ES/aion-2/crafting", "en": f"{BASE}/en/aion-2/c
 ATRIBUCION = "Datos de recetas y objetos: MetaBot.GG (https://metabot.gg/es_ES/aion-2/crafting) — https://metabot.gg/llms.txt"
 VERSION_POR_DEFECTO = "0.0.4387.0"
 
-# Nos identificamos como lo que somos (no como un navegador): una herramienta personal
-# que descarga el catálogo una vez, con pausa entre peticiones y caché local.
+# We identify ourselves as what we are (not as a browser): a personal tool
+# that downloads the catalog once, pausing between requests and caching locally.
 CABECERAS = {
     "User-Agent": "life-skill-manager-aion2/0.1 (personal non-commercial crafting calculator; "
     "1 request every 2s, cached; credits metabot.gg)",
@@ -62,7 +62,7 @@ PROFESIONES = {
     "alquimia": "Alquimia",
     "cocina": "Cocina",
 }
-# Categorías tal y como vienen en metabot (ES y EN) → clave de profesión.
+# Categories as they come from metabot (ES and EN) → profession key.
 CATEGORIAS = {
     "herreria": "herreria", "weaponsmithing": "herreria",
     "armadura": "armadura", "armorsmithing": "armadura",
@@ -72,7 +72,7 @@ CATEGORIAS = {
 }
 FACCION_POR_DIGITO = {"1": "elyos", "2": "asmodian"}
 
-# Ingredientes propios de cada facción (para verificar el dígito de facción).
+# Faction-specific ingredients (to verify the faction digit).
 INGREDIENTES_FACCION = {
     "yggdrasil": "elyos", "aria": "elyos", "targena": "elyos", "inina": "elyos",
     "asvata": "asmodian", "azpha": "asmodian", "okra": "asmodian", "pujery": "asmodian",
@@ -85,7 +85,7 @@ def log(msg: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Descarga con caché
+# Cached download
 # ---------------------------------------------------------------------------
 class Descargador:
     def __init__(self, pausa: float = 2.0, refrescar: bool = False):
@@ -101,10 +101,10 @@ class Descargador:
         return self._cliente
 
     def obtener(self, url: str, archivo_cache: Path, transformar=None) -> str | None:
-        """Devuelve el texto de `url`, usando `archivo_cache` (.gz) si existe.
+        """Returns the text of `url`, using `archivo_cache` (.gz) if it exists.
 
-        `transformar(html) -> str` permite guardar solo la parte útil de la página.
-        Devuelve None si la página no existe (404).
+        `transformar(html) -> str` lets you store only the useful part of the page.
+        Returns None if the page does not exist (404).
         """
         if archivo_cache.exists() and not self.refrescar:
             return gzip.decompress(archivo_cache.read_bytes()).decode("utf-8")
@@ -117,21 +117,21 @@ class Descargador:
             try:
                 r = self._cliente_http().get(url)
             except httpx.HTTPError as e:
-                log(f"  ! error de red en {url}: {e}; reintento")
+                log(f"  ! network error on {url}: {e}; retrying")
                 time.sleep(5 * (intento + 1))
                 continue
             if r.status_code == 404:
-                log(f"  ! 404 en {url}")
+                log(f"  ! 404 on {url}")
                 return None
             if r.status_code in (429, 500, 502, 503, 504):
-                log(f"  ! HTTP {r.status_code} en {url}; reintento")
+                log(f"  ! HTTP {r.status_code} on {url}; retrying")
                 time.sleep(10 * (intento + 1))
                 continue
             r.raise_for_status()
             texto = r.text
             break
         if texto is None:
-            raise RuntimeError(f"No se pudo descargar {url}")
+            raise RuntimeError(f"Could not download {url}")
         self.descargas += 1
         if transformar:
             texto = transformar(texto)
@@ -145,10 +145,10 @@ class Descargador:
 
 
 # ---------------------------------------------------------------------------
-# Página de crafteo: payload Next.js
+# Crafting page: Next.js payload
 # ---------------------------------------------------------------------------
 def extraer_flight(html: str) -> str:
-    """Concatena las cadenas de todos los `self.__next_f.push([1, "..."])`."""
+    """Concatenates the strings of all `self.__next_f.push([1, "..."])` calls."""
     partes = []
     for m in re.finditer(r"self\.__next_f\.push\((\[.*?\])\)</script>", html, re.S):
         try:
@@ -188,11 +188,11 @@ def extraer_datos_crafteo(html: str) -> dict:
             continue
         if datos:
             return datos
-    raise RuntimeError("No se encontró el bloque de recetas en la página de metabot (¿cambió el formato?)")
+    raise RuntimeError("Recipe block not found in the metabot page (did the format change?)")
 
 
 def cuerpo_html(html: str) -> str:
-    """HTML renderizado antes de los scripts del payload."""
+    """HTML rendered before the payload scripts."""
     i = html.find("self.__next_f")
     return html[:i] if i > 0 else html
 
@@ -207,8 +207,8 @@ def texto_plano(html: str) -> str:
 
 
 def filas_tablas_faccion(html_es: str) -> list[dict]:
-    """Filas de las tablas por profesión de la página ES: producto, etiqueta de facción,
-    maestría e ingredientes visibles."""
+    """Rows of the per-profession tables of the ES page: product, faction label,
+    mastery and visible ingredients."""
     filas = []
     for fila in re.findall(r'<tr><th scope="row">(.*?)</tr>', cuerpo_html(html_es), re.S):
         slug = re.search(r'href="/es_ES/aion-2/items/([^"]+)"', fila)
@@ -227,14 +227,14 @@ def filas_tablas_faccion(html_es: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Páginas de objeto
+# Item pages
 # ---------------------------------------------------------------------------
 def _num(s: str) -> int:
     return int(s.replace(".", "").replace(",", ""))
 
 
 def parsear_pagina_objeto(texto: str) -> dict:
-    """Extrae de la página de objeto (ES, texto plano) comercio y precios."""
+    """Extracts trade info and prices from the item page (ES, plain text)."""
     info: dict = {"comercio": None, "precio_tienda": None, "precio_venta": None, "tienda": None}
     m = re.search(r"según los datos del juego: ([^.|]+?)\.", texto)
     if m:
@@ -265,8 +265,8 @@ def comerciable_de(comercio: str | None) -> bool | None:
     if c == "comerciable":
         return True
     if "ligado al alma" in c:
-        # EN "Soul-bound": metabot dice que el objeto tira su opción de habilidad "cuando se liga
-        # al alma", así que parece un vínculo al usarlo, no "no comerciable". Sin confirmar → None.
+        # EN "Soul-bound": metabot says the item rolls its skill option "when soul-bound",
+        # so it looks like a bind-on-use, not "not tradeable". Unconfirmed → None.
         return None
     if "no comerciable" in c or "vinculad" in c or "cuenta" in c or "no se puede" in c:
         return False
@@ -289,7 +289,7 @@ def obtener_info_objetos(desc: Descargador, slugs: list[str]) -> dict[str, dict]
 
 
 # ---------------------------------------------------------------------------
-# Construcción del catálogo
+# Building the catalog
 # ---------------------------------------------------------------------------
 def _sin_tildes(s: str) -> str:
     import unicodedata
@@ -303,12 +303,12 @@ def faccion_receta(rid: int) -> str:
 def profesion_de(categoria: str) -> str:
     clave = _sin_tildes(categoria).strip()
     if clave not in CATEGORIAS:
-        raise ValueError(f"Categoría desconocida: {categoria!r}")
+        raise ValueError(f"Unknown category: {categoria!r}")
     return CATEGORIAS[clave]
 
 
 def verificar_faccion(datos_es: dict, html_es: str) -> dict:
-    """Cruza el dígito de facción con las etiquetas de metabot y con ingredientes de facción."""
+    """Cross-checks the faction digit against metabot's labels and faction ingredients."""
     items = datos_es["items"]
     gather = datos_es.get("gather", {})
 
@@ -355,7 +355,7 @@ def construir_catalogo(datos_es: dict, datos_en: dict, info_objetos: dict[str, d
     gather_en = datos_en.get("gather", {})
     recetas_es = datos_es["recipes"]
 
-    # facción de uso de cada objeto
+    # faction that uses each item
     uso = collections.defaultdict(set)
     for r in recetas_es:
         f = faccion_receta(r["id"])
@@ -384,7 +384,7 @@ def construir_catalogo(datos_es: dict, datos_en: dict, info_objetos: dict[str, d
             "vinculado": "(vinculado)" in nombre.lower() or "(bound)" in (nombre_en or "").lower(),
             "precio_npc": info.get("precio_tienda"),
             "slug": slug,
-            # --- campos extra (ver "Cambios propuestos" en docs/contratos.md) ---
+            # --- extra fields (see "Proposed changes" in docs/contratos.md) ---
             "faccion": "ambas" if len(facs) == 2 else (facs.pop() if facs else None),
             "precio_venta_npc": info.get("precio_venta"),
             "comercio": info.get("comercio"),
@@ -392,7 +392,7 @@ def construir_catalogo(datos_es: dict, datos_en: dict, info_objetos: dict[str, d
             "recoleccion": (gather_es.get(k) or {}).get("name"),
         }
 
-    # producto de combo: versión "Splendent"/"brillante" del producto, misma facción
+    # combo product: "Splendent"/"brillante" version of the product, same faction
     por_nombre_en = collections.defaultdict(list)
     for k, o in objetos.items():
         if o["nombre_en"]:
@@ -429,7 +429,7 @@ def construir_catalogo(datos_es: dict, datos_en: dict, info_objetos: dict[str, d
             "curva_combo": rate[1] if len(rate) > 1 else None,
             "producto_combo": prod_combo,
             "cantidad_combo": int(r["qty"]) if prod_combo else None,
-            # extra: "mejora" = maestría 0, etiquetada "Mejora"/"Upgrade" por metabot
+            # extra: "mejora" = mastery 0, labeled "Mejora"/"Upgrade" by metabot
             "tipo": "mejora" if int(r["mastery"]) == 0 else "normal",
         })
 
@@ -467,11 +467,11 @@ def construir_catalogo(datos_es: dict, datos_en: dict, info_objetos: dict[str, d
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Genera data/catalogo.json desde metabot.gg")
-    ap.add_argument("--productos", action="store_true", help="descarga también las páginas de los productos")
-    ap.add_argument("--sin-objetos", action="store_true", help="no descarga páginas de objeto")
-    ap.add_argument("--refrescar", action="store_true", help="ignora la caché y vuelve a descargar")
-    ap.add_argument("--pausa", type=float, default=2.0, help="segundos entre peticiones (por defecto 2)")
+    ap = argparse.ArgumentParser(description="Generates data/catalogo.json from metabot.gg")
+    ap.add_argument("--productos", action="store_true", help="also download the product pages")
+    ap.add_argument("--sin-objetos", action="store_true", help="don't download item pages")
+    ap.add_argument("--refrescar", action="store_true", help="ignore the cache and download again")
+    ap.add_argument("--pausa", type=float, default=2.0, help="seconds between requests (default 2)")
     ap.add_argument("--salida", type=Path, default=SALIDA)
     args = ap.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
@@ -479,20 +479,20 @@ def main(argv=None) -> int:
 
     desc = Descargador(pausa=args.pausa, refrescar=args.refrescar)
     try:
-        log("Descargando páginas de fabricación (ES y EN)...")
+        log("Downloading crafting pages (ES and EN)...")
         html_es = desc.obtener(URL_CRAFTEO["es"], CACHE / "crafting_es.html.gz")
         html_en = desc.obtener(URL_CRAFTEO["en"], CACHE / "crafting_en.html.gz")
         datos_es = extraer_datos_crafteo(html_es)
         datos_en = extraer_datos_crafteo(html_en)
         if {r["id"] for r in datos_es["recipes"]} != {r["id"] for r in datos_en["recipes"]}:
-            log("  ! Las recetas ES y EN no coinciden; se usa ES como referencia")
+            log("  ! ES and EN recipes don't match; using ES as the reference")
         m = re.search(r"build (\d+\.\d+\.\d+\.\d+)", html_es)
         version = m.group(1) if m else VERSION_POR_DEFECTO
-        log(f"  {len(datos_es['recipes'])} recetas, {len(datos_es['items'])} objetos, "
-            f"{len(datos_es['curves'])} curvas (cliente {version})")
+        log(f"  {len(datos_es['recipes'])} recipes, {len(datos_es['items'])} items, "
+            f"{len(datos_es['curves'])} curves (client {version})")
 
         evidencia = verificar_faccion(datos_es, html_es)
-        log(f"  Facción: {evidencia}")
+        log(f"  Faction: {evidencia}")
 
         info_objetos: dict[str, dict] = {}
         if not args.sin_objetos:
@@ -504,11 +504,11 @@ def main(argv=None) -> int:
             if args.productos:
                 elegidos |= productos
             slug_de = {i: items[str(i)]["href"].rsplit("/", 1)[-1] for i in map(int, items)}
-            # lo que ya esté en caché se usa siempre (sin descargar)
+            # whatever is already cached is always used (no download)
             elegidos |= {i for i, s in slug_de.items() if (CACHE / "objetos" / f"{s}.txt.gz").exists()}
             slugs = sorted({slug_de[i] for i in elegidos if i in slug_de})
             pendientes = sum(1 for s in slugs if not (CACHE / "objetos" / f"{s}.txt.gz").exists())
-            log(f"Páginas de objeto: {len(slugs)} ({pendientes} sin caché, ~{pendientes * args.pausa / 60:.1f} min)")
+            log(f"Item pages: {len(slugs)} ({pendientes} not cached, ~{pendientes * args.pausa / 60:.1f} min)")
             info_objetos = obtener_info_objetos(desc, slugs)
 
         cat = construir_catalogo(datos_es, datos_en, info_objetos, version, evidencia)
@@ -518,16 +518,16 @@ def main(argv=None) -> int:
     args.salida.parent.mkdir(parents=True, exist_ok=True)
     args.salida.write_text(json.dumps(cat, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    # resumen
+    # summary
     c = collections.Counter((r["profesion"], r["faccion"]) for r in cat["recetas"])
-    log(f"\nGenerado {args.salida} ({len(cat['recetas'])} recetas, {len(cat['objetos'])} objetos, "
-        f"{desc.descargas} descargas nuevas)")
+    log(f"\nGenerated {args.salida} ({len(cat['recetas'])} recipes, {len(cat['objetos'])} items, "
+        f"{desc.descargas} new downloads)")
     for p in PROFESIONES:
         log(f"  {PROFESIONES[p]:<11} elyos={c[(p, 'elyos')]:>3}  asmodian={c[(p, 'asmodian')]:>3}")
     precios = sum(1 for o in cat["objetos"].values() if o["precio_npc"] is not None)
     comer = collections.Counter(o["comerciable"] for o in cat["objetos"].values())
-    log(f"  precio_npc conocido: {precios} objetos; comerciable: {dict(comer)}")
-    log(f"  producto_combo inferido en {sum(1 for r in cat['recetas'] if r['producto_combo'])} recetas")
+    log(f"  precio_npc known: {precios} items; comerciable: {dict(comer)}")
+    log(f"  producto_combo inferred in {sum(1 for r in cat['recetas'] if r['producto_combo'])} recipes")
     return 0
 
 

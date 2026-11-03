@@ -9,7 +9,7 @@ echo   Life Skill Manager - Aion 2
 echo ==============================================
 echo.
 
-rem --- ¿ya está abierta? ---
+rem --- is it already running? ---
 netstat -ano | findstr /r /c:":8000 .*LISTENING" >nul
 if not errorlevel 1 (
     echo La app ya está en marcha. Abriendo el navegador...
@@ -18,7 +18,7 @@ if not errorlevel 1 (
     exit /b 0
 )
 
-rem --- entorno virtual ---
+rem --- virtual environment ---
 if not exist ".venv\Scripts\python.exe" (
     echo Creando el entorno de Python en .venv ...
     set "PY_BASE=%LOCALAPPDATA%\Programs\Python\Python314\python.exe"
@@ -41,7 +41,7 @@ if errorlevel 1 (
     echo.
 )
 
-rem --- .env para conectar con TU proyecto de Supabase (opcional) ---
+rem --- .env to connect to YOUR Supabase project (optional) ---
 if not exist ".env" (
     copy /y ".env.example" ".env" >nul
     echo.
@@ -50,7 +50,7 @@ if not exist ".env" (
     echo Mientras esté vacío se usa la base de datos local data\aion2.db.
 )
 
-rem --- catálogo de recetas (no viene en el repositorio: se descarga de metabot.gg) ---
+rem --- recipe catalog (not in the repository: downloaded from metabot.gg) ---
 if not exist "data\catalogo.json" (
     echo.
     echo Primera vez: descargando el catálogo de recetas de metabot.gg.

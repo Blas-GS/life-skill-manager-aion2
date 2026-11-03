@@ -1,6 +1,6 @@
-"""Acceso al catálogo de recetas y objetos (data/catalogo.json).
+"""Access to the recipe and item catalog (data/catalogo.json).
 
-Interfaz (docs/contratos.md, sección 1):
+Interface (docs/contratos.md, section 1):
     cat = cargar_catalogo()
     cat.objeto(id) -> dict | None
     cat.nombre(id) -> str
@@ -8,7 +8,7 @@ Interfaz (docs/contratos.md, sección 1):
     cat.recetas_que_producen(id) -> list[dict]
     cat.buscar(texto, limite=10) -> list[(id, nombre, puntuacion)]
 
-Extras (compatibles con el contrato): `buscar(..., faccion=...)`, `receta(id)`,
+Extras (compatible with the contract): `buscar(..., faccion=...)`, `receta(id)`,
 `recetas_que_usan(id)`, `prob_exito(receta, nivel)`, `prob_combo(receta, nivel)`.
 """
 from __future__ import annotations
@@ -31,7 +31,7 @@ _ALIAS_FACCION = {
 
 
 def normalizar(texto: str) -> str:
-    """Minúsculas, sin tildes y con espacios simples (para comparar nombres)."""
+    """Lowercase, no accents and single spaces (for comparing names)."""
     t = unicodedata.normalize("NFD", texto or "")
     t = "".join(c for c in t if unicodedata.category(c) != "Mn")
     return " ".join(t.lower().split())
@@ -63,7 +63,7 @@ class Catalogo:
             for ing, _ in r["ingredientes"]:
                 self._por_ingrediente.setdefault(ing, []).append(r)
 
-        # índice de búsqueda: una entrada por (id, nombre ES/EN normalizado)
+        # search index: one entry per (id, normalized ES/EN name)
         self._claves: list[tuple[int, str]] = []
         self._textos: list[str] = []
         for k, o in self.objetos.items():
@@ -72,7 +72,7 @@ class Catalogo:
                     self._claves.append((int(k), o.get("nombre") or n))
                     self._textos.append(normalizar(n))
 
-    # --- objetos -----------------------------------------------------------
+    # --- items -------------------------------------------------------------
     def objeto(self, id) -> dict | None:
         return self.objetos.get(str(id))
 
@@ -80,13 +80,13 @@ class Catalogo:
         o = self.objeto(id)
         return o["nombre"] if o else f"#{id}"
 
-    # --- recetas -----------------------------------------------------------
+    # --- recipes -----------------------------------------------------------
     def receta(self, id) -> dict | None:
         return self._recetas_por_id.get(int(id))
 
     def recetas_de(self, faccion: str | None) -> list[dict]:
-        """Recetas que puede fabricar esa facción (incluye las marcadas 'ambas').
-        Con faccion=None devuelve todas."""
+        """Recipes that faction can craft (includes those marked 'ambas').
+        With faccion=None returns all of them."""
         f = normalizar_faccion(faccion)
         if f is None or f == "ambas":
             return list(self.recetas)
@@ -98,10 +98,10 @@ class Catalogo:
     def recetas_que_usan(self, id) -> list[dict]:
         return list(self._por_ingrediente.get(int(id), []))
 
-    # --- probabilidades ----------------------------------------------------
+    # --- probabilities -----------------------------------------------------
     def _valor_curva(self, curva: str | None, diferencia: int) -> float | None:
         if diferencia < 0:
-            return None  # receta bloqueada
+            return None  # recipe locked
         if not curva:
             return 1.0
         valores = self.curvas.get(curva)
@@ -110,13 +110,13 @@ class Catalogo:
         return valores[min(diferencia, len(valores) - 1)] / 100.0
 
     def prob_exito(self, receta: dict, nivel: int) -> float | None:
-        """Probabilidad de éxito (0–1) con maestría `nivel`; None si la receta está bloqueada.
-        Índice de la curva = nivel − nivel_receta, saturado al último valor."""
+        """Success probability (0–1) at mastery `nivel`; None if the recipe is locked.
+        Curve index = nivel − nivel_receta, clamped to the last value."""
         return self._valor_curva(receta.get("curva"), nivel - receta.get("nivel", 0))
 
     def prob_combo(self, receta: dict, nivel: int) -> float:
-        """Probabilidad de que una fabricación acabe en resultado de combo:
-        éxito normal × combo_pct × éxito de la fabricación combo."""
+        """Probability that a craft ends in a combo result:
+        normal success × combo_pct × success of the combo craft."""
         if not receta.get("combo_pct"):
             return 0.0
         exito = self.prob_exito(receta, nivel)
@@ -125,11 +125,11 @@ class Catalogo:
         exito_combo = self._valor_curva(receta.get("curva_combo"), nivel - receta.get("nivel", 0)) or 0.0
         return exito * receta["combo_pct"] / 100.0 * exito_combo
 
-    # --- búsqueda ----------------------------------------------------------
+    # --- search ------------------------------------------------------------
     def buscar(self, texto: str, limite: int = 10, faccion: str | None = None) -> list[tuple[int, str, float]]:
-        """Búsqueda difusa por nombre (ES o EN), sin tildes ni mayúsculas.
-        Devuelve [(id, nombre, puntuacion 0–100)] ordenado de mejor a peor.
-        Con `faccion` se descartan los objetos exclusivos de la otra facción."""
+        """Fuzzy search by name (ES or EN), ignoring accents and case.
+        Returns [(id, nombre, puntuacion 0–100)] sorted from best to worst.
+        With `faccion`, items exclusive to the other faction are discarded."""
         consulta = normalizar(texto)
         if not consulta:
             return []
@@ -160,7 +160,7 @@ def _cargar(ruta: str, mtime: float) -> Catalogo:
 
 
 def cargar_catalogo(ruta: str | Path | None = None) -> Catalogo:
-    """Carga data/catalogo.json (o `ruta`). Se cachea mientras el archivo no cambie."""
+    """Loads data/catalogo.json (or `ruta`). Cached as long as the file does not change."""
     p = Path(ruta) if ruta else RUTA_POR_DEFECTO
     if not p.exists():
         raise FileNotFoundError(

@@ -10,7 +10,7 @@ INICIO = datetime(2026, 10, 1, tzinfo=timezone.utc)
 
 
 @dataclass
-class Lectura:  # copia local compatible con app/db.py (contrato §2)
+class Lectura:  # local copy compatible with app/db.py (contract §2)
     servidor_id: str
     objeto_id: int
     fecha: datetime
@@ -27,7 +27,7 @@ def lectura(horas, precio, cantidad=None, ofertas=None):
 
 
 def historico_normal():
-    """30 días, precio entre 900 y 1100, 100 en oferta y ~10 ventas/día (repone cada día)."""
+    """30 days, price between 900 and 1100, 100 on offer and ~10 sales/day (restocks daily)."""
     precios = [900, 950, 1000, 1050, 1100]
     lecturas = []
     for dia in range(30):
@@ -58,9 +58,9 @@ def test_precio_hundido():
     actual = lectura(30 * 24, 700, 20, ofertas=[(700, 5), (1010, 15)])
     r = precio_objetivo_venta(historico_normal() + [actual], actual, None, unidades=2)
     assert r["estado"] == "hundido"
-    assert r["precio_recomendado"] == 1000  # mediana
+    assert r["precio_recomendado"] == 1000  # median
     assert "esperar" in r["aviso"]
-    # para vender a 1000 hay 5 unidades más baratas por delante
+    # to sell at 1000 there are 5 cheaper units ahead
     assert r["dias_para_vender"] == pytest.approx((5 + 2) / r["velocidad_dia"])
 
 
@@ -68,7 +68,7 @@ def test_precio_saturado():
     actual = lectura(30 * 24, 1000, 5000)
     r = precio_objetivo_venta(historico_normal(), actual, {"rebaja_listado": 1}, unidades=10)
     assert r["estado"] == "saturado"
-    assert r["precio_recomendado"] == 970  # 3% por debajo
+    assert r["precio_recomendado"] == 970  # 3% below
     assert "saturado" in r["aviso"].lower()
     assert r["dias_para_vender"] is not None
 
@@ -92,7 +92,7 @@ def test_acepta_dicts():
     r = precio_objetivo_venta(hist, None, None)
     assert r["estado"] == "normal" and r["precio_recomendado"] == 103
     assert r["velocidad_dia"] == pytest.approx(5)
-    # sin ninguna venta detectada en 4 días → saturado
+    # no sale detected in 4 days → saturated
     for l in hist:
         l["cantidad_total"] = 50
     assert precio_objetivo_venta(hist, None, None)["estado"] == "saturado"

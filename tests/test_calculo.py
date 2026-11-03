@@ -33,7 +33,7 @@ def precios_okra(venta=12500, okra_ofertas=None):
     return {OKRA: info(788, okra_ofertas), CARNE: info(700), ACEITE: info(880), OKRA_FRITA: info(venta)}
 
 
-# --- Excel del usuario: Okra frita de artesano -------------------------------
+# --- User's Excel: artisan Okra frita ----------------------------------------
 
 def test_okra_frita_reproduce_excel(cat):
     r = receta(cat, 125010001)
@@ -49,9 +49,9 @@ def test_okra_frita_reproduce_excel(cat):
     assert a["beneficio_intento"] * 76 == pytest.approx(272565.70, abs=0.01)
     assert {f["id"]: f["origen"] for f in a["desglose_ingredientes"]} == {
         OKRA: "mercado", CARNE: "mercado", ACEITE: "mercado"}
-    # sin libro de ofertas ni cantidad, el stock es desconocido → sin límite
+    # no order book or quantity: stock is unknown → no limit
     assert a["max_intentos_mercado"] is None
-    # 76 intentos ≈ 86 unidades > 10 anuncios
+    # 76 attempts ≈ 86 units > 10 listings
     assert any("anuncios" in av for av in a["avisos"])
 
 
@@ -72,7 +72,7 @@ def test_comisiones_y_rebaja(cat):
 
 
 def test_producto_combo_distinto(cat):
-    r = receta(cat, 115016002)  # espada: combo 20% con curva 50% → espléndida
+    r = receta(cat, 115016002)  # sword: 20% combo with a 50% curve → splendent
     precios = {LINGOTE: info(300), ESPADA: info(2000), ESPADA_ESPLENDIDA: info(10000)}
     a = analizar_receta(r, cat, precios, {"rebaja_listado": 0}, nivel=5, ahora=AHORA)
     p = 0.60
@@ -88,11 +88,11 @@ def test_curva_satura_al_ultimo_valor(cat):
     assert probabilidades(r, 99, cat)["p_exito"] == pytest.approx(0.90)
 
 
-# --- comprar vs fabricar -----------------------------------------------------
+# --- buy vs craft ------------------------------------------------------------
 
 def test_fabricar_si_es_mas_barato(cat):
     precios = {MINERAL: info(100), LINGOTE: info(300)}
-    # lingote fabricado = 2 × 100 + 50 (fundente NPC) = 250 < 300
+    # crafted ingot = 2 × 100 + 50 (NPC flux) = 250 < 300
     assert coste_adquisicion(LINGOTE, cat, precios, niveles={"herreria": 1}) == (250, "fabricar", 115016001)
 
 
@@ -139,7 +139,7 @@ def test_ciclos_no_cuelgan():
     assert coste_adquisicion(1, cat, {2: {"precio_min": 10}}) == (10, "fabricar", 1)
 
 
-# --- bloqueo por nivel -------------------------------------------------------
+# --- level lock --------------------------------------------------------------
 
 def test_receta_bloqueada_por_nivel(cat):
     precios = {LINGOTE: info(300), HACHA: info(5000)}
@@ -152,7 +152,7 @@ def test_receta_bloqueada_por_nivel(cat):
     assert HACHA in [o["producto"] for o in ops]
 
 
-# --- libro de ofertas por tramos ---------------------------------------------
+# --- tiered order book -------------------------------------------------------
 
 def test_libro_de_ofertas_por_tramos(cat):
     r = receta(cat, 125010001)
@@ -162,13 +162,13 @@ def test_libro_de_ofertas_por_tramos(cat):
     okra = a["desglose_ingredientes"][0]
     assert okra["coste_total"] == pytest.approx(6 * 788 + 3 * 900)
     assert a["coste_total"] == pytest.approx(6 * 788 + 3 * 900 + 3 * (2100 + 4400))
-    # 4º intento: 3 × 2000 + 6500 = 12500 ≥ ingreso esperado 12450,39 → no compensa
+    # 4th attempt: 3 × 2000 + 6500 = 12500 ≥ expected income 12450.39 → not worth it
     assert a["max_intentos_mercado"] == 3
 
 
 def test_max_intentos_limitado_por_stock(cat):
     r = receta(cat, 125010001)
-    ofertas = [(788, 6), (900, 4)]  # 10 unidades → 3 intentos
+    ofertas = [(788, 6), (900, 4)]  # 10 units → 3 attempts
     a = analizar_receta(r, cat, precios_okra(okra_ofertas=ofertas), {"rebaja_listado": 0},
                         nivel=3, ahora=AHORA)
     assert a["max_intentos_mercado"] == 3
@@ -185,7 +185,7 @@ def test_tramos_cambian_a_fabricar_cuando_el_mercado_encarece(cat):
     assert fila["origenes"] == {"mercado": 3, "fabricar": 3}
 
 
-# --- avisos ------------------------------------------------------------------
+# --- warnings ----------------------------------------------------------------
 
 def test_avisos_precio_antiguo_sin_precio_y_saturado(cat):
     r = receta(cat, 125010001)
@@ -200,7 +200,7 @@ def test_avisos_precio_antiguo_sin_precio_y_saturado(cat):
     assert a["antiguedad_precios_horas"] == pytest.approx(30)
 
 
-# --- inventario y panel ------------------------------------------------------
+# --- inventory and dashboard -------------------------------------------------
 
 def test_inventario_puedes_hacer_y_te_faltan(cat):
     r = receta(cat, 125010001)
@@ -210,7 +210,7 @@ def test_inventario_puedes_hacer_y_te_faltan(cat):
     assert a["intentos_con_inventario"] == 2
     assert {f["id"]: f["faltan"] for f in a["faltan"]} == {OKRA: 2, CARNE: 3, ACEITE: 5}
     assert a["coste_faltante"] == pytest.approx(2 * 788 + 3 * 700 + 5 * 880)
-    assert a["coste_total"] == pytest.approx(a["coste_faltante"])  # lo propio cuesta 0
+    assert a["coste_total"] == pytest.approx(a["coste_faltante"])  # owned items cost 0
     assert "Puedes hacer 2 intento(s)" in a["mensaje_inventario"]
     assert "te faltan" in a["mensaje_inventario"]
 
@@ -226,8 +226,8 @@ def test_mejores_oportunidades_filtros_y_orden(cat):
     niveles = {"herreria": 5, "cocina": 3}
     ops = mejores_oportunidades(cat, precios, None, niveles, "elyos", ahora=AHORA)
     productos = [o["producto"] for o in ops]
-    assert ESTOFADO not in productos            # receta asmodiana
-    assert LINGOTE in productos                 # intermedio rentable (250 → 400)
+    assert ESTOFADO not in productos            # asmodian recipe
+    assert LINGOTE in productos                 # profitable intermediate (250 → 400)
     beneficios = [o["beneficio_total"] for o in ops]
     assert beneficios == sorted(beneficios, reverse=True)
     assert all(o["intentos_recomendados"] == 100 for o in ops)
@@ -250,4 +250,4 @@ def test_mejores_oportunidades_con_inventario(cat):
                                 filtros={"tope_intentos": 2})
     okra = next(o for o in ops if o["producto"] == OKRA_FRITA)
     assert okra["intentos_con_inventario"] == 1
-    assert okra["inversion"] == pytest.approx(8864)  # solo el 2º intento hay que comprarlo
+    assert okra["inversion"] == pytest.approx(8864)  # only the 2nd attempt has to be bought

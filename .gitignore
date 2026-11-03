@@ -1,28 +1,28 @@
-# --- Entorno de Python ---
+# --- Python environment ---
 .venv/
 __pycache__/
 *.pyc
 .pytest_cache/
 
-# --- Secretos: nunca subir la clave de Supabase ---
+# --- Secrets: never commit the Supabase key ---
 .env
 .env.*
 !.env.example
 
-# --- Datos locales ---
-# Perfiles, niveles, inventario, histórico de precios, cola sin conexión, calibración.
-# El catálogo (data/catalogo.json) y la caché de descargas (data/cache_metabot/) se
-# generan en cada equipo con tools/importar_metabot.py: son datos de metabot.gg y
-# no se redistribuyen.
+# --- Local data ---
+# Profiles, levels, inventory, price history, offline queue, calibration.
+# The catalog (data/catalogo.json) and the download cache (data/cache_metabot/) are
+# generated on each machine with tools/importar_metabot.py: they are metabot.gg data
+# and are not redistributed.
 data/*
 !data/.gitkeep
 
-# Capturas y vídeos temporales del mercado (las de tests/fixtures son sintéticas y sí se suben)
+# Temporary market screenshots and videos (the ones in tests/fixtures are synthetic and are committed)
 /capturas/
 
-# --- Archivos personales de partida ---
+# --- Personal starting files ---
 *.xlsx
 aion2_crafting_calculator*.html
 
-# --- Configuración local de Claude Code ---
+# --- Local Claude Code settings ---
 .claude/settings.local.json
