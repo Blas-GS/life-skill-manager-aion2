@@ -290,8 +290,8 @@ def precio(c, sid, oid, p, cant=None, ofertas_texto=None):
 # ---------------------------------------------------------------------------
 def test_frontend_y_estado(entorno):
     r = entorno.c.get("/")
-    assert r.status_code == 200 and "Mejores oportunidades ahora" in r.text
-    for archivo in ("/app.js", "/estilos.css"):
+    assert r.status_code == 200 and "Life Skill Manager" in r.text
+    for archivo in ("/app.js", "/estilos.css", "/iconos.js"):
         assert entorno.c.get(archivo).status_code == 200
     e = entorno.c.get("/api/estado").json()
     assert e["backend"] == "local" and e["en_cola"] == 0
