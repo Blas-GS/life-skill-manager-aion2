@@ -6,7 +6,7 @@ La app funciona sin Supabase: si `.env` no tiene datos, guarda todo en `data/aio
 
 ## 1. Crear el proyecto (gratis)
 1. Entra en <https://supabase.com> y crea una cuenta (puedes usar GitHub o tu correo).
-2. **New project**. Elige un nombre (p.ej. `aion2`), una contraseña de base de datos (guárdala en tu gestor de contraseñas; la app no la necesita) y la región **Central EU (Frankfurt)** o la más cercana.
+2. **New project**. Elige un nombre (p.ej. `life-skill-manager`), una contraseña de base de datos (guárdala en tu gestor de contraseñas; la app no la necesita) y la región **Central EU (Frankfurt)** o la más cercana.
 3. Deja activada la opción **Data API** si aparece. Espera un par de minutos a que el proyecto esté listo.
 
 ## 2. Crear las tablas

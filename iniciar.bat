@@ -2,10 +2,10 @@
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
-title AION 2 - Rentabilidad de artesania
+title Life Skill Manager - Aion 2
 
 echo ==============================================
-echo   AION 2 - Rentabilidad de artesanía
+echo   Life Skill Manager - Aion 2
 echo ==============================================
 echo.
 

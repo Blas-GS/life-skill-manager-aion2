@@ -42,7 +42,7 @@ def crear_app(servicios: Servicios | None = None, arrancar: bool = True) -> Fast
             except Exception:  # noqa: BLE001
                 pass
 
-    app = FastAPI(title="AION 2 · Rentabilidad de artesanía", lifespan=ciclo,
+    app = FastAPI(title="Life Skill Manager - Aion 2", lifespan=ciclo,
                   docs_url="/api/docs", openapi_url="/api/openapi.json")
     app.state.servicios = serv
 

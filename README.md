@@ -1,4 +1,4 @@
-# AION 2 · Artesanía rentable
+# Life Skill Manager - Aion 2
 
 **Proyecto Open Source** (licencia MIT). Se aceptan PRs de corrección de errores y mejoras del código, sujetos a la aprobación del autor. Si quieres implementar una funcionalidad nueva o un cambio de comportamiento, **abre primero un issue** para comentarlo antes de programarlo. Ver [Contribuir](#contribuir).
 

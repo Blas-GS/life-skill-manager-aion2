@@ -50,7 +50,7 @@ VERSION_POR_DEFECTO = "0.0.4387.0"
 # Nos identificamos como lo que somos (no como un navegador): una herramienta personal
 # que descarga el catálogo una vez, con pausa entre peticiones y caché local.
 CABECERAS = {
-    "User-Agent": "aion2-artesania/0.1 (personal non-commercial crafting calculator; "
+    "User-Agent": "life-skill-manager-aion2/0.1 (personal non-commercial crafting calculator; "
     "1 request every 2s, cached; credits metabot.gg)",
     "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
 }

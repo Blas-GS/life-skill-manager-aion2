@@ -1,4 +1,4 @@
-# Plan: AION 2 — Herramienta de rentabilidad de artesanía
+# Plan: Life Skill Manager - Aion 2 (herramienta de rentabilidad de artesanía)
 
 ## Contexto
 Quieres saber, en cada momento, qué recetas de AION 2 (cliente EU en español, ambas facciones) te conviene fabricar comprando los ingredientes en el mercado y vendiendo el producto, teniendo en cuenta tu nivel de artesanía, tu inventario/almacén, las comisiones y la probabilidad de éxito/combo. Hoy tienes un HTML (datos inventados/incompletos, nombres sin verificar, impuesto mal modelado) y un Excel en inglés con ~12 recetas y precios del 09/10/2026. El objetivo es una app local con datos reales, histórico de precios y un panel claro de "mejores oportunidades ahora".
@@ -32,7 +32,7 @@ Quieres saber, en cada momento, qué recetas de AION 2 (cliente EU en español, 
 
 ### Estructura
 ```
-Crafing Aion 2/
+Life Skill Manager - Aion 2/
   iniciar.bat               crea .venv con la ruta de Python 3.14, instala deps, arranca y abre el navegador
   .env                      SUPABASE_URL, SUPABASE_KEY (solo local)
   requirements.txt          fastapi, uvicorn, httpx, supabase, python-dotenv, mss, pillow, opencv-python (o imageio-ffmpeg),
