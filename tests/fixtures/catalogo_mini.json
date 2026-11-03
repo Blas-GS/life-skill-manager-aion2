@@ -1,0 +1,57 @@
+{
+  "fuente": "fixture de tests",
+  "version_cliente": "0.0.0",
+  "generado": "2026-11-02T12:00:00Z",
+  "profesiones": {"herreria": "Herrería", "armadura": "Armadura", "orfebreria": "Orfebrería", "alquimia": "Alquimia", "cocina": "Cocina"},
+  "objetos": {
+    "610620013": {"nombre": "Mineral de hierro", "nombre_en": "Iron Ore", "grado": "common", "comerciable": true, "vinculado": false, "precio_npc": null},
+    "630541001": {"nombre": "Fundente de herrero (vinculado)", "nombre_en": "Blacksmith Flux (Bound)", "grado": "common", "comerciable": false, "vinculado": true, "precio_npc": 50},
+    "610710001": {"nombre": "Lingote de hierro", "nombre_en": "Iron Ingot", "grado": "common", "comerciable": true, "vinculado": false, "precio_npc": null},
+    "100000001": {"nombre": "Espada de hierro", "nombre_en": "Iron Sword", "grado": "rare", "comerciable": true, "vinculado": false, "precio_npc": null},
+    "100000002": {"nombre": "Espada de hierro espléndida", "nombre_en": "Splendid Iron Sword", "grado": "legend", "comerciable": true, "vinculado": false, "precio_npc": null},
+    "100000010": {"nombre": "Hacha de orichalcum", "nombre_en": "Orichalcum Axe", "grado": "epic", "comerciable": true, "vinculado": false, "precio_npc": null},
+    "620100001": {"nombre": "Okra", "nombre_en": "Okra", "grado": "common", "comerciable": true, "vinculado": false, "precio_npc": null},
+    "620100002": {"nombre": "Carne cruda fresca", "nombre_en": "Fresh Raw Meat", "grado": "common", "comerciable": true, "vinculado": false, "precio_npc": null},
+    "620100003": {"nombre": "Aceite", "nombre_en": "Oil", "grado": "common", "comerciable": true, "vinculado": false, "precio_npc": null},
+    "620200001": {"nombre": "Okra frita de artesano", "nombre_en": "Artisan Fried Okra", "grado": "rare", "comerciable": true, "vinculado": false, "precio_npc": null},
+    "620200002": {"nombre": "Estofado asmodiano", "nombre_en": "Asmodian Stew", "grado": "common", "comerciable": true, "vinculado": false, "precio_npc": null}
+  },
+  "curvas": {
+    "c_espada": [60.0, 70.0, 80.0, 90.0],
+    "c_combo_espada": [50.0],
+    "c_cocina": [85.0, 88.0, 90.888],
+    "c_combo_cocina": [90.888]
+  },
+  "recetas": [
+    {
+      "id": 115016001, "faccion": "ambas", "profesion": "herreria", "nivel": 1,
+      "producto": 610710001, "cantidad": 1,
+      "ingredientes": [[610620013, 2], [630541001, 1]],
+      "curva": null, "combo_pct": 0, "curva_combo": null, "producto_combo": null, "cantidad_combo": null
+    },
+    {
+      "id": 115016002, "faccion": "ambas", "profesion": "herreria", "nivel": 5,
+      "producto": 100000001, "cantidad": 1,
+      "ingredientes": [[610710001, 3]],
+      "curva": "c_espada", "combo_pct": 20, "curva_combo": "c_combo_espada", "producto_combo": 100000002, "cantidad_combo": 1
+    },
+    {
+      "id": 115016003, "faccion": "ambas", "profesion": "herreria", "nivel": 50,
+      "producto": 100000010, "cantidad": 1,
+      "ingredientes": [[610710001, 5]],
+      "curva": "c_espada", "combo_pct": 0, "curva_combo": null, "producto_combo": null, "cantidad_combo": null
+    },
+    {
+      "id": 125010001, "faccion": "ambas", "profesion": "cocina", "nivel": 1,
+      "producto": 620200001, "cantidad": 1,
+      "ingredientes": [[620100001, 3], [620100002, 3], [620100003, 5]],
+      "curva": "c_cocina", "combo_pct": 30, "curva_combo": "c_combo_cocina", "producto_combo": null, "cantidad_combo": null
+    },
+    {
+      "id": 125010002, "faccion": "asmodian", "profesion": "cocina", "nivel": 1,
+      "producto": 620200002, "cantidad": 1,
+      "ingredientes": [[620100002, 2]],
+      "curva": null, "combo_pct": 0, "curva_combo": null, "producto_combo": null, "cantidad_combo": null
+    }
+  ]
+}

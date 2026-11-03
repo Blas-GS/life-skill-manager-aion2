@@ -1,0 +1,179 @@
+"""Tests del catálogo (data/catalogo.json generado por tools/importar_metabot.py)."""
+import collections
+
+import pytest
+
+from app.catalogo import cargar_catalogo, normalizar
+
+
+@pytest.fixture(scope="module")
+def cat():
+    # El catálogo no se sube al repositorio: en un clon nuevo hay que generarlo primero.
+    try:
+        return cargar_catalogo()
+    except FileNotFoundError:
+        pytest.skip("data/catalogo.json no existe: genera el catálogo con tools/importar_metabot.py")
+
+
+def _por_nombre(cat, nombre, faccion=None):
+    ids = [int(k) for k, o in cat.objetos.items() if o["nombre"] == nombre
+           and (faccion is None or o.get("faccion") in (faccion, "ambas"))]
+    assert ids, f"no existe el objeto {nombre!r}"
+    return ids
+
+
+def test_cabecera(cat):
+    d = cat.datos
+    assert d["fuente"] == "metabot.gg"
+    assert "metabot.gg" in d["atribucion"]
+    assert d["version_cliente"]
+    assert set(d["profesiones"]) == {"herreria", "armadura", "orfebreria", "alquimia", "cocina"}
+
+
+def test_numero_de_recetas(cat):
+    assert len(cat.recetas) == 512
+    assert len({r["id"] for r in cat.recetas}) == 512
+
+
+def test_profesiones_y_facciones(cat):
+    c = collections.Counter((r["profesion"], r["faccion"]) for r in cat.recetas)
+    for p in cat.profesiones:
+        assert c[(p, "elyos")] > 0 and c[(p, "asmodian")] > 0, p
+        assert c[(p, "elyos")] == c[(p, "asmodian")], p  # recetas espejo por facción
+    assert {r["faccion"] for r in cat.recetas} <= {"elyos", "asmodian", "ambas"}
+
+
+def test_integridad_referencias(cat):
+    for r in cat.recetas:
+        assert cat.objeto(r["producto"]) is not None
+        assert r["cantidad"] >= 1
+        assert 0 <= r["nivel"] <= 100
+        assert 0 <= r["combo_pct"] <= 100
+        for ing, cant in r["ingredientes"]:
+            assert cat.objeto(ing) is not None, (r["id"], ing)
+            assert cant >= 1
+        for curva in (r["curva"], r["curva_combo"]):
+            assert curva is None or curva in cat.curvas
+        if r["producto_combo"] is not None:
+            assert cat.objeto(r["producto_combo"]) is not None
+            assert r["combo_pct"] > 0
+
+
+def test_objetos_formato(cat):
+    for k, o in cat.objetos.items():
+        assert k.isdigit()
+        assert o["nombre"] and o["nombre_en"]
+        assert isinstance(o["vinculado"], bool)
+        assert o["comerciable"] in (True, False, None)
+        assert o["precio_npc"] is None or o["precio_npc"] > 0
+        if "(vinculado)" in o["nombre"]:
+            assert o["vinculado"]
+
+
+def test_mineral_de_orichalcum(cat):
+    o = cat.objeto(610620013)
+    assert o["nombre"] == "Mineral de orichalcum"
+    assert o["nombre_en"] == "Orichalcum Ore"
+    assert not o["vinculado"]
+
+
+def test_solomillo_wellington_dragon_oscuro(cat):
+    (prod,) = _por_nombre(cat, "Solomillo wellington de dragón oscuro")
+    (r,) = cat.recetas_que_producen(prod)
+    assert r["profesion"] == "cocina"
+    assert r["nivel"] == 90
+    assert r["combo_pct"] == 30
+    assert r["faccion"] == "asmodian"
+    ingredientes = {cat.nombre(i): q for i, q in r["ingredientes"]}
+    assert ingredientes == {
+        "Carne suave de Balaur": 1,
+        "Conide": 3,
+        "Okra": 3,
+        "Aceite de ulmus (vinculado)": 5,
+        "Od": 1,
+    }
+
+
+def test_buscar_okra(cat):
+    res = cat.buscar("okra")
+    assert res
+    oid, nombre, puntuacion = res[0]
+    assert nombre == "Okra" and oid == 610680050 and puntuacion == 100
+
+
+def test_buscar_ignora_tildes_y_mayusculas(cat):
+    assert cat.buscar("SOLOMILLO WELLINGTON DE DRAGON OSCURO")[0][1] == "Solomillo wellington de dragón oscuro"
+    assert cat.buscar("aceite de ulmus vinculado")[0][1] == "Aceite de ulmus (vinculado)"
+    assert cat.buscar("Orichalcum Ore")[0][0] == 610620013  # también por nombre EN
+    assert normalizar("  Orfebrería  ") == "orfebreria"
+
+
+def test_buscar_por_faccion(cat):
+    ids_asmo = {i for i, _, _ in cat.buscar("Arco de Asvata", limite=20, faccion="asmodian")}
+    ids_ely = {i for i, _, _ in cat.buscar("Arco de Asvata", limite=20, faccion="elyos")}
+    assert any(cat.nombre(i) == "Arco de Asvata" for i in ids_asmo)
+    assert not any(cat.nombre(i) == "Arco de Asvata" for i in ids_ely)
+
+
+def test_recetas_de_faccion(cat):
+    ely, asmo = cat.recetas_de("elyos"), cat.recetas_de("Asmodianos")
+    assert len(ely) + len(asmo) == 512
+    assert len(cat.recetas_de(None)) == 512
+    with pytest.raises(ValueError):
+        cat.recetas_de("balaur")
+
+
+def test_faccion_por_ingredientes(cat):
+    """Asvata/Okra/Conide... solo en recetas asmodian; Yggdrasil/Aria/Inina... solo en elyos."""
+    asmo = ("asvata", "azpha", "okra", "pujery", "conide", "morfa", "raydam")
+    ely = ("yggdrasil", "aria", "targena", "inina")
+    for r in cat.recetas:
+        nombres = " ".join(normalizar(cat.nombre(i)) for i, _ in r["ingredientes"])
+        if any(w in nombres.split() for w in asmo):
+            assert r["faccion"] == "asmodian", r["id"]
+        if any(w in nombres.split() for w in ely):
+            assert r["faccion"] == "elyos", r["id"]
+
+
+def test_evidencia_faccion_sin_contradicciones(cat):
+    ev = cat.datos["evidencia_faccion"]
+    assert ev["tablas_metabot"]["contradicen"] == 0 and ev["tablas_metabot"]["coinciden"] > 50
+    assert ev["ingredientes_de_faccion"]["contradicen"] == 0
+
+
+def test_combo_brillante(cat):
+    (prod,) = _por_nombre(cat, "Espadón de orichalcum de artesano", faccion="elyos")
+    r = [r for r in cat.recetas_que_producen(prod) if r["faccion"] == "elyos"][0]
+    assert cat.nombre(r["producto_combo"]) == "Espadón de orichalcum brillante de artesano"
+    assert r["cantidad_combo"] == 1
+    # la comida no tiene producto de combo conocido
+    (sol,) = _por_nombre(cat, "Solomillo wellington de dragón oscuro")
+    assert cat.recetas_que_producen(sol)[0]["producto_combo"] is None
+
+
+def test_probabilidades_como_metabot(cat):
+    """metabot: Arma de Puño de rey dragón estelar con dominio 60 → 67,51% éxito y ~13,51% combo."""
+    r = cat.receta(121083001)
+    assert cat.nombre(r["producto"]) == "Arma de Puño de rey dragón estelar"
+    assert cat.prob_exito(r, 60) == pytest.approx(0.6751, abs=1e-4)
+    assert cat.prob_combo(r, 60) == pytest.approx(0.1351, abs=1e-4)
+    assert cat.prob_exito(r, 59) is None  # bloqueada
+    assert cat.prob_exito(r, 500) == cat.curvas[r["curva"]][-1] / 100  # satura
+
+
+def test_precios_npc(cat):
+    if all(o["precio_npc"] is None for o in cat.objetos.values()):
+        pytest.skip("catálogo generado sin páginas de objeto (--sin-objetos)")
+    (ulmus,) = _por_nombre(cat, "Aceite de ulmus (vinculado)")
+    o = cat.objeto(ulmus)
+    assert o["precio_npc"] == 880
+    assert o["comerciable"] is False
+    (okra,) = _por_nombre(cat, "Okra")
+    assert cat.objeto(okra)["comerciable"] is True
+    # equipo "Ligado al alma": comerciabilidad dudosa → None
+    espadon = cat.objeto(cat.receta(111023001)["producto"])
+    assert espadon["comercio"] == "Ligado al alma" and espadon["comerciable"] is None
+    # todos los ingredientes vinculados tienen precio de tienda
+    usados = {i for r in cat.recetas for i, _ in r["ingredientes"]}
+    sin_precio = [cat.nombre(i) for i in usados if cat.objeto(i)["vinculado"] and not cat.objeto(i)["precio_npc"]]
+    assert not sin_precio

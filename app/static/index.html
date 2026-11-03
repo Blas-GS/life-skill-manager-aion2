@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AION 2 · Rentabilidad de artesanía</title>
+<link rel="stylesheet" href="estilos.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer></script>
+<script src="app.js" defer></script>
+</head>
+<body>
+<header>
+  <div class="logo">A2</div>
+  <h1>AION 2 · Artesanía rentable</h1>
+  <div class="hdr-right">
+    <select id="sel-perfil" title="Perfil (personaje y servidor)"></select>
+    <span class="estado-bd" id="estado-bd" title="Base de datos">…</span>
+  </div>
+</header>
+
+<nav id="nav">
+  <button data-tab="panel" class="activa">Panel</button>
+  <button data-tab="mercado">Mercado</button>
+  <button data-tab="captura">Captura</button>
+  <button data-tab="recetas">Recetas</button>
+  <button data-tab="personaje">Personaje</button>
+  <button data-tab="ajustes">Ajustes</button>
+</nav>
+
+<main>
+  <div id="avisos-globales"></div>
+
+  <!-- ===================== PANEL ===================== -->
+  <section class="pestana activa" id="tab-panel">
+    <div class="card">
+      <h2>Mejores oportunidades ahora <span class="sub" id="panel-sub"></span></h2>
+      <div class="fila">
+        <div><label for="f-prof">Profesión</label><select id="f-prof"><option value="">Todas</option></select></div>
+        <div><label for="f-inv">Inversión máx. (Kinah)</label><input id="f-inv" type="number" min="0" step="1000" placeholder="sin límite"></div>
+        <div><label for="f-margen">Margen mín. (%)</label><input id="f-margen" type="number" step="1" placeholder="cualquiera"></div>
+        <div class="auto"><label class="check"><input type="checkbox" id="f-inter" checked> Incluir intermedios</label></div>
+        <div class="auto"><label class="check"><input type="checkbox" id="f-usarinv" checked> Usar mi inventario</label></div>
+        <div class="auto"><button class="btn btn-p" id="btn-panel">Actualizar</button></div>
+      </div>
+      <p class="ayuda">Solo recetas desbloqueadas con tus niveles y de la facción de tu servidor. Beneficio esperado tras comisión de registro e impuesto de venta, con probabilidad de éxito y combo. Pulsa una fila para ver avisos y el detalle.
+        Semáforo de precios: <span class="semaforo s-verde"></span>≤ 6 h <span class="semaforo s-ambar"></span>≤ 24 h <span class="semaforo s-rojo"></span>más antiguos.</p>
+      <div id="panel-avisos"></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr>
+            <th></th><th>Receta</th><th class="ocultar-movil">Profesión</th>
+            <th class="num">Benef./intento</th><th class="num">Margen</th><th class="num">Intentos</th>
+            <th class="num">Inversión</th><th class="num">Benef. total</th>
+            <th class="num" title="Beneficio total vendiendo al precio objetivo">A precio objetivo</th><th></th>
+          </tr></thead>
+          <tbody id="panel-tabla"><tr><td colspan="10" class="vacio">Cargando…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== MERCADO ===================== -->
+  <section class="pestana" id="tab-mercado">
+    <div class="card">
+      <h2>Mercado <span class="sub" id="mercado-servidor"></span></h2>
+      <div class="fila">
+        <div class="ac"><label for="m-buscar">Buscar objeto</label><input id="m-buscar" placeholder="Escribe un nombre, p. ej. Mineral de orichalcum" autocomplete="off"></div>
+      </div>
+      <div id="m-detalle"></div>
+    </div>
+    <div class="card" id="m-manual-card">
+      <h2>Entrada manual rápida</h2>
+      <p class="ayuda">Para apuntar un precio que estás viendo en el juego. El libro de ofertas es opcional: una línea por anuncio con «precio cantidad».</p>
+      <div class="fila">
+        <div class="ac"><label for="mm-obj">Objeto</label><input id="mm-obj" placeholder="Objeto…" autocomplete="off"></div>
+        <div><label for="mm-precio">Precio mín.</label><input id="mm-precio" type="number" min="0"></div>
+        <div><label for="mm-cant">Cantidad en oferta</label><input id="mm-cant" type="number" min="0"></div>
+        <div><label for="mm-anun">Nº anuncios</label><input id="mm-anun" type="number" min="0"></div>
+      </div>
+      <div style="margin-top:10px"><label for="mm-ofertas">Libro de ofertas (opcional)</label><textarea id="mm-ofertas" placeholder="1.250 10&#10;1.300 25"></textarea></div>
+      <div style="margin-top:10px"><button class="btn btn-p" id="mm-guardar">Guardar lectura</button></div>
+    </div>
+    <div class="card">
+      <h2>Últimas lecturas de este servidor</h2>
+      <div class="fila"><div><input id="m-filtro" placeholder="Filtrar por nombre…"></div></div>
+      <div class="tbl-wrap" style="margin-top:10px">
+        <table><thead><tr><th>Objeto</th><th class="num">Precio mín.</th><th class="num">En oferta</th><th class="num ocultar-movil">Anuncios</th><th>Fuente</th><th>Antigüedad</th></tr></thead>
+          <tbody id="m-ultimas"></tbody></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== CAPTURA ===================== -->
+  <section class="pestana" id="tab-captura">
+    <div class="card">
+      <h2>Leer el mercado</h2>
+      <div class="aviso info">La app <b>solo mira la pantalla</b>: tú navegas el mercado con tu ratón y teclado. Nunca envía clics ni teclas al juego, ni toca su proceso, memoria o red (anticheat). Las imágenes se procesan en memoria y los archivos se borran cuando los datos están guardados y verificados.</div>
+      <div class="grab" style="margin-top:12px">
+        <button class="btn btn-g btn-grande" id="c-empezar">▶ Empezar lectura</button>
+        <button class="btn btn-d btn-grande" id="c-terminar" disabled>■ Terminar</button>
+        <div id="c-estado-grab" class="dim"></div>
+      </div>
+      <p class="ayuda">Pulsa «Empezar», cambia al juego y recorre las pestañas y categorías del mercado a tu ritmo (deja cada pantalla quieta un instante). Vuelve y pulsa «Terminar».</p>
+      <h3>Subir un vídeo o una captura</h3>
+      <div class="zona-subida" id="c-zona">Arrastra aquí un vídeo (OBS, Xbox Game Bar Win+Alt+R) o una captura (F12 de Steam, Impr Pant) — o pulsa para elegir
+        <input type="file" id="c-archivo" accept="video/*,image/*" hidden multiple></div>
+    </div>
+    <div class="card">
+      <h2>Sesiones de lectura</h2>
+      <div class="tbl-wrap"><table><thead><tr><th>Fecha</th><th>Origen</th><th>Estado</th><th class="num">Filas</th><th class="num">Dudosas</th><th>Resultado</th><th></th></tr></thead>
+        <tbody id="c-sesiones"></tbody></table></div>
+      <div id="c-revision"></div>
+    </div>
+    <div class="card">
+      <h2>Calibración de la zona de lectura</h2>
+      <p class="ayuda">Una vez por resolución: abre el mercado en el juego, pulsa «Capturar pantalla» (tienes unos segundos para cambiar al juego) o carga una captura, y arrastra un rectángulo sobre la lista de objetos. Opcionalmente marca las columnas de nombre, precio y cantidad (mejora la lectura).</p>
+      <div class="fila">
+        <div class="auto"><button class="btn btn-s" id="cal-pantalla">📷 Capturar pantalla (5 s)</button></div>
+        <div class="auto"><button class="btn btn-s" id="cal-cargar">Cargar imagen…</button><input type="file" id="cal-archivo" accept="image/*" hidden></div>
+        <div><label for="cal-modo">Estoy marcando</label><select id="cal-modo">
+          <option value="lista">Zona de la lista</option><option value="nombre">Columna nombre</option>
+          <option value="precio">Columna precio</option><option value="cantidad">Columna cantidad</option></select></div>
+        <div class="auto"><button class="btn btn-p" id="cal-guardar" disabled>Guardar calibración</button></div>
+      </div>
+      <div id="cal-info" class="ayuda"></div>
+      <div class="lienzo-wrap" id="cal-wrap" hidden><canvas id="cal-lienzo"></canvas></div>
+    </div>
+  </section>
+
+  <!-- ===================== RECETAS ===================== -->
+  <section class="pestana" id="tab-recetas">
+    <div class="card">
+      <h2>Explorador de recetas</h2>
+      <div class="fila">
+        <div><label for="r-q">Buscar</label><input id="r-q" placeholder="Nombre del producto…"></div>
+        <div><label for="r-prof">Profesión</label><select id="r-prof"><option value="">Todas</option></select></div>
+        <div class="auto"><label class="check"><input type="checkbox" id="r-desb"> Solo desbloqueadas</label></div>
+      </div>
+      <div class="tbl-wrap" style="margin-top:10px;max-height:40vh">
+        <table><thead><tr><th>Producto</th><th>Profesión</th><th class="num">Nivel</th><th class="num">Combo</th><th>Estado</th></tr></thead>
+          <tbody id="r-lista"></tbody></table>
+      </div>
+    </div>
+    <div class="card" id="r-detalle-card" hidden>
+      <div id="r-detalle"></div>
+    </div>
+  </section>
+
+  <!-- ===================== PERSONAJE ===================== -->
+  <section class="pestana" id="tab-personaje">
+    <div class="g2">
+      <div class="card">
+        <h2>Perfiles</h2>
+        <p class="ayuda">Un perfil por personaje. Cada servidor es de una facción y tiene su propio mercado.</p>
+        <div id="p-perfiles"></div>
+        <h3>Nuevo perfil / editar</h3>
+        <div class="fila">
+          <div><label for="p-nombre">Personaje</label><input id="p-nombre" placeholder="Nombre del personaje"></div>
+          <div><label for="p-servidor">Servidor</label><select id="p-servidor"></select></div>
+          <div class="auto"><button class="btn btn-p" id="p-guardar">Guardar perfil</button></div>
+        </div>
+        <input type="hidden" id="p-id">
+      </div>
+      <div class="card">
+        <h2>Servidores</h2>
+        <div id="s-lista"></div>
+        <h3>Nuevo servidor</h3>
+        <div class="fila">
+          <div><label for="s-nombre">Nombre</label><input id="s-nombre" placeholder="p. ej. Ariel"></div>
+          <div><label for="s-faccion">Facción</label><select id="s-faccion"><option value="elyos">Elyos</option><option value="asmodian">Asmodian</option></select></div>
+        </div>
+        <div class="fila" style="margin-top:8px">
+          <div><label for="s-com">Comisión de registro (%)</label><input id="s-com" type="number" step="0.1" placeholder="por defecto"></div>
+          <div><label for="s-imp">Impuesto de venta (%)</label><input id="s-imp" type="number" step="0.1" placeholder="por defecto"></div>
+          <div class="auto"><button class="btn btn-p" id="s-guardar">Guardar servidor</button></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Niveles de artesanía <span class="sub" id="n-perfil"></span></h2>
+      <div class="g5" id="n-niveles"></div>
+      <div style="margin-top:12px"><button class="btn btn-p" id="n-guardar">Guardar niveles</button></div>
+    </div>
+    <div class="card">
+      <h2>Inventario y almacén</h2>
+      <div class="fila">
+        <div class="ac"><label for="i-obj">Objeto</label><input id="i-obj" placeholder="Añadir objeto…" autocomplete="off"></div>
+        <div><label for="i-cant">Cantidad</label><input id="i-cant" type="number" min="0"></div>
+        <div><label for="i-ubic">Ubicación</label><select id="i-ubic"><option value="inventario">Inventario</option><option value="almacen">Almacén</option></select></div>
+        <div class="auto"><button class="btn btn-p" id="i-anadir">Guardar</button></div>
+      </div>
+      <div class="tbl-wrap" style="margin-top:12px;max-height:45vh">
+        <table><thead><tr><th>Objeto</th><th>Ubicación</th><th class="num">Cantidad</th><th></th></tr></thead>
+          <tbody id="i-tabla"></tbody></table>
+      </div>
+      <h3>Pegar lista de texto</h3>
+      <p class="ayuda">Una línea por objeto: «Mineral de orichalcum: 120». Se empareja con el catálogo; revisa las dudosas antes de guardar.</p>
+      <textarea id="i-texto" placeholder="Mineral de orichalcum: 120&#10;Okra x 35"></textarea>
+      <div class="fila" style="margin-top:8px">
+        <div class="auto"><button class="btn btn-s" id="i-pegar">Revisar</button></div>
+      </div>
+      <div id="i-pegado"></div>
+    </div>
+  </section>
+
+  <!-- ===================== AJUSTES ===================== -->
+  <section class="pestana" id="tab-ajustes">
+    <div class="card">
+      <h2>Cálculo</h2>
+      <div class="g3">
+        <div><label for="a-com">Comisión de registro (%)</label><input id="a-com" type="number" step="0.1"><p class="ayuda">Se paga al listar y no se devuelve.</p></div>
+        <div><label for="a-imp">Impuesto de venta (%)</label><input id="a-imp" type="number" step="0.1"><p class="ayuda">Se descuenta al vender. Cada servidor puede tener los suyos (Personaje).</p></div>
+        <div><label for="a-rebaja">Rebaja al listar (Kinah)</label><input id="a-rebaja" type="number" min="0"><p class="ayuda">Cuánto por debajo del más barato listas.</p></div>
+        <div><label for="a-combo">Si el combo falla…</label><select id="a-combo"><option value="pierde_todo">se pierde todo</option><option value="queda_base">queda el producto normal</option></select></div>
+        <div><label for="a-valinv">Valorar inventario</label><select id="a-valinv"><option value="mercado">a precio de mercado (coste de oportunidad)</option><option value="cero">a coste 0</option></select></div>
+        <div><label for="a-horas">Precio antiguo a partir de (h)</label><input id="a-horas" type="number" min="1"></div>
+        <div><label for="a-tope">Intentos recomendados máx.</label><input id="a-tope" type="number" min="1"></div>
+        <div><label for="a-anun">Anuncios activos máx.</label><input id="a-anun" type="number" min="1"></div>
+        <div><label for="a-tmp">Tope de temporales (MB)</label><input id="a-tmp" type="number" min="50"></div>
+      </div>
+      <button class="btn btn-p" id="a-guardar">Guardar ajustes</button>
+    </div>
+    <div class="card">
+      <h2>Precios de tienda NPC</h2>
+      <p class="ayuda">Para ingredientes vinculados que se compran a un NPC. Los del catálogo vienen de metabot.gg; los que pongas aquí mandan.</p>
+      <div class="fila">
+        <div class="ac"><label for="npc-obj">Objeto</label><input id="npc-obj" placeholder="Objeto…" autocomplete="off"></div>
+        <div><label for="npc-precio">Precio (Kinah)</label><input id="npc-precio" type="number" min="0"></div>
+        <div class="auto"><button class="btn btn-p" id="npc-guardar">Guardar</button></div>
+      </div>
+      <div class="tbl-wrap" style="margin-top:10px;max-height:40vh"><table><thead><tr><th>Objeto</th><th class="num">Precio</th><th>Origen</th><th></th></tr></thead><tbody id="npc-tabla"></tbody></table></div>
+    </div>
+    <div class="card">
+      <h2>Base de datos y estado</h2>
+      <div id="a-estado"></div>
+      <div style="margin-top:10px"><button class="btn btn-s" id="a-subir">Reintentar subir la cola</button></div>
+    </div>
+    <div class="card">
+      <h2>Créditos</h2>
+      <p class="ayuda">Datos de recetas, objetos y curvas de éxito: <a href="https://metabot.gg/es_ES/aion-2/crafting" target="_blank" rel="noopener">MetaBot.GG — AION 2 Crafting</a>.</p>
+      <p class="ayuda">Herramienta no oficial: no está afiliada a NCSOFT. AION y AION 2 son marcas de NCSOFT Corporation; los datos del juego son de su propiedad. La app no automatiza el juego: solo lee imágenes de tu pantalla. Úsala bajo tu responsabilidad.</p>
+    </div>
+  </section>
+</main>
+<footer>Herramienta local · los precios se leen de tu pantalla, nunca del juego · <a href="https://metabot.gg/es_ES/aion-2/crafting" target="_blank" rel="noopener">datos: MetaBot.GG</a> · no oficial, sin relación con NCSOFT</footer>
+<div id="toasts"></div>
+</body>
+</html>
