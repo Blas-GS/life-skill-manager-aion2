@@ -3,6 +3,7 @@ import collections
 
 import pytest
 
+from app.calculo import probabilidades
 from app.catalogo import cargar_catalogo, normalizar
 
 
@@ -155,10 +156,11 @@ def test_probabilidades_como_metabot(cat):
     """metabot: Arma de Puño de rey dragón estelar at mastery 60 → 67.51% success and ~13.51% combo."""
     r = cat.receta(121083001)
     assert cat.nombre(r["producto"]) == "Arma de Puño de rey dragón estelar"
-    assert cat.prob_exito(r, 60) == pytest.approx(0.6751, abs=1e-4)
-    assert cat.prob_combo(r, 60) == pytest.approx(0.1351, abs=1e-4)
-    assert cat.prob_exito(r, 59) is None  # locked
-    assert cat.prob_exito(r, 500) == cat.curvas[r["curva"]][-1] / 100  # clamps
+    p60 = probabilidades(r, 60, cat)
+    assert p60["p_exito"] == pytest.approx(0.6751, abs=1e-4)
+    assert p60["p_combo"] == pytest.approx(0.1351, abs=1e-4)
+    assert not probabilidades(r, 59, cat)["desbloqueada"]
+    assert probabilidades(r, 500, cat)["p_exito"] == cat.curvas[r["curva"]][-1] / 100  # clamps
 
 
 def test_precios_npc(cat):

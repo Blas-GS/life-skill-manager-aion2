@@ -1,16 +1,14 @@
 """Service layer: ties together catalog, repository, calculation engine and capture for the API.
 
-The modules from the other parts (app/catalogo.py, app/db.py, app/calculo.py,
-app/precio_objetivo.py, app/captura/*) are imported lazily: if they don't exist
-yet or fail, the operation that needs them raises `NoDisponible` with a
+The catalog (data/catalogo.json) and the database are loaded on first use: if either is
+missing or misconfigured, the operations that need it raise `NoDisponible` (HTTP 503) with a
 message in Spanish and the rest of the app keeps working.
 
-Tests can inject doubles: Servicios(catalogo=..., repo=..., motor=..., precio_objetivo=...).
+Tests can inject them: Servicios(catalogo=Catalogo(...), repo=RepositorioLocal(...)).
 """
 from __future__ import annotations
 
-import importlib
-import inspect
+import io
 import json
 import logging
 import math
@@ -20,30 +18,32 @@ import threading
 import time
 import unicodedata
 import uuid
-from dataclasses import asdict, dataclass, field, is_dataclass
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from app import calculo, precio_objetivo
+from app.captura import calibracion, grabacion, parser, temporales, video
+from app.catalogo import Catalogo, cargar_catalogo
+from app.db import Lectura, obtener_repositorio
+from app.precio_objetivo import campo
+
 log = logging.getLogger("aion2.servicios")
 
 RAIZ = Path(__file__).resolve().parent.parent
-DIR_DATOS = RAIZ / "data"
 DIR_TMP = RAIZ / "capturas" / "tmp"
-RUTA_CATALOGO = DIR_DATOS / "catalogo.json"
-RUTA_SESIONES = DIR_DATOS / "captura_sesiones.json"
-RUTA_COLA = DIR_DATOS / "pendientes.jsonl"
+RUTA_SESIONES = RAIZ / "data" / "captura_sesiones.json"
+RUTA_COLA = RAIZ / "data" / "pendientes.jsonl"
 
 PROFESIONES = {"herreria": "Herrería", "armadura": "Armadura", "orfebreria": "Orfebrería",
                "alquimia": "Alquimia", "cocina": "Cocina"}
 FACCIONES = {"elyos": "Elyos", "asmodian": "Asmodian"}
 
+# defaults shown in the Settings tab (the engine fills in the rest from calculo.AJUSTES_POR_DEFECTO)
 AJUSTES_POR_DEFECTO = {
-    "comision_registro": 0.02,
-    "impuesto_venta": 0.10,
-    "rebaja_listado": 1,
-    "combo_fallido": "pierde_todo",
-    "valorar_inventario": "mercado",
+    **{k: calculo.AJUSTES_POR_DEFECTO[k] for k in (
+        "comision_registro", "impuesto_venta", "rebaja_listado", "combo_fallido", "valorar_inventario")},
     "tope_tmp_mb": 500,
     "horas_precio_antiguo": 24,
 }
@@ -64,62 +64,27 @@ EXT_IMAGEN = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 SEMAFORO_VERDE_H = 6
 SEMAFORO_AMBAR_H = 24
 
-# messages when a module is missing
+# components listed in /api/estado; only the catalog and the database can be missing
+COMPONENTES = ("catalogo", "repo", "motor", "precio_objetivo", "ocr", "parser",
+               "grabacion", "video", "calibracion", "temporales")
 _FALTA = {
-    "catalogo": "El catálogo de recetas no está disponible todavía (app/catalogo.py o data/catalogo.json). "
+    "catalogo": "El catálogo de recetas no está disponible todavía (data/catalogo.json). "
                 "Genera el catálogo con tools\\importar_metabot.py.",
-    "repo": "La base de datos no está disponible todavía (app/db.py).",
-    "motor": "El motor de cálculo no está disponible todavía (app/calculo.py).",
-    "precio_objetivo": "El cálculo de precio objetivo no está disponible todavía (app/precio_objetivo.py).",
-    "ocr": "El OCR no está disponible todavía (app/captura/ocr.py).",
-    "parser": "El lector de filas del mercado no está disponible todavía (app/captura/parser.py).",
-    "grabacion": "El modo grabación no está disponible todavía (app/captura/grabacion.py).",
-    "video": "La importación de vídeo no está disponible todavía (app/captura/video.py).",
-    "calibracion": "La calibración no está disponible todavía (app/captura/calibracion.py).",
-    "temporales": "La limpieza de temporales no está disponible todavía (app/captura/temporales.py).",
-}
-_MODULOS = {
-    "motor": "app.calculo", "precio_objetivo": "app.precio_objetivo", "ocr": "app.captura.ocr",
-    "parser": "app.captura.parser", "grabacion": "app.captura.grabacion", "video": "app.captura.video",
-    "calibracion": "app.captura.calibracion", "temporales": "app.captura.temporales",
+    "repo": "La base de datos no está disponible todavía (.env o data/aion2.db).",
 }
 
 
 class NoDisponible(RuntimeError):
-    """A module from another part of the app does not exist yet or could not be loaded."""
+    """The catalog or the database could not be loaded."""
 
     def __init__(self, componente: str, detalle: str | None = None):
         self.componente = componente
-        mensaje = _FALTA.get(componente, f"Componente no disponible: {componente}.")
-        if detalle:
-            mensaje += f" Detalle: {detalle}"
-        super().__init__(mensaje)
-
-
-@dataclass
-class LecturaLocal:
-    """Copy of app.db.Lectura for when app/db.py does not exist (test doubles only)."""
-    servidor_id: str
-    objeto_id: int
-    fecha: datetime
-    precio_min: float | None
-    cantidad_total: int | None
-    num_anuncios: int | None
-    ofertas: list = field(default_factory=list)
-    fuente: str = "manual"
-    id: str | None = None
+        super().__init__(_FALTA[componente] + (f" Detalle: {detalle}" if detalle else ""))
 
 
 # ---------------------------------------------------------------------------
 # utilities
 # ---------------------------------------------------------------------------
-
-def campo(obj, nombre, defecto=None):
-    if obj is None:
-        return defecto
-    valor = obj.get(nombre, defecto) if isinstance(obj, dict) else getattr(obj, nombre, defecto)
-    return defecto if valor is None else valor
-
 
 def utc(fecha) -> datetime | None:
     if fecha is None or fecha == "":
@@ -172,21 +137,10 @@ def limpio(valor):
     if is_dataclass(valor) and not isinstance(valor, type):
         return limpio(asdict(valor))
     if isinstance(valor, dict):
-        return {(str(k) if not isinstance(k, str) else k): limpio(v) for k, v in valor.items()}
+        return {(k if isinstance(k, str) else str(k)): limpio(v) for k, v in valor.items()}
     if isinstance(valor, (list, tuple, set)):
         return [limpio(v) for v in valor]
     return valor
-
-
-def llamar(func, *args, **kwargs):
-    """Calls `func` passing only the keyword arguments it accepts."""
-    try:
-        params = inspect.signature(func).parameters
-    except (TypeError, ValueError):
-        return func(*args, **kwargs)
-    if any(p.kind == p.VAR_KEYWORD for p in params.values()):
-        return func(*args, **kwargs)
-    return func(*args, **{k: v for k, v in kwargs.items() if k in params})
 
 
 def _num(valor, tipo=float, nombre="valor", minimo=None, permitir_none=True):
@@ -215,150 +169,16 @@ def _entero_texto(texto: str) -> int | None:
 
 
 # ---------------------------------------------------------------------------
-# uniform view of the catalog (Catalogo object or catalogo.json dict)
-# ---------------------------------------------------------------------------
-
-class VistaCatalogo:
-    def __init__(self, cat):
-        self.cat = cat
-        raw = cat if isinstance(cat, dict) else None
-        if raw is None:
-            for nombre in ("datos", "data", "raw"):
-                if isinstance(getattr(cat, nombre, None), dict):
-                    raw = getattr(cat, nombre)
-                    break
-        if raw is not None:
-            self.objetos = raw.get("objetos") or {}
-            recetas = raw.get("recetas") or []
-            self.profesiones = raw.get("profesiones") or PROFESIONES
-            self.meta = {k: raw.get(k) for k in ("fuente", "version_cliente", "generado")}
-        else:
-            self.objetos = getattr(cat, "objetos", None) or {}
-            recetas = getattr(cat, "recetas", None)
-            if recetas is None or callable(recetas):
-                vistas, recetas = set(), []
-                for faccion in FACCIONES:
-                    for r in cat.recetas_de(faccion):
-                        if r["id"] not in vistas:
-                            vistas.add(r["id"])
-                            recetas.append(r)
-            self.profesiones = getattr(cat, "profesiones", None) or PROFESIONES
-            self.meta = {k: getattr(cat, k, None) for k in ("fuente", "version_cliente", "generado")}
-        self.recetas = list(recetas)
-        self._por_id = {int(r["id"]): r for r in self.recetas}
-        self._productores: dict[int, list] = {}
-        self._ingredientes: set[int] = set()
-        for r in self.recetas:
-            self._productores.setdefault(int(r["producto"]), []).append(r)
-            if r.get("producto_combo"):
-                self._productores.setdefault(int(r["producto_combo"]), []).append(r)
-            for ing, _ in r.get("ingredientes") or []:
-                self._ingredientes.add(int(ing))
-        self._indice = None
-
-    def objeto(self, oid) -> dict:
-        obj = self.objetos.get(str(oid)) or self.objetos.get(oid)
-        if obj is None and not isinstance(self.cat, dict) and hasattr(self.cat, "objeto"):
-            try:
-                obj = self.cat.objeto(oid)
-            except Exception:
-                obj = None
-        return obj or {}
-
-    def nombre(self, oid) -> str:
-        o = self.objeto(oid)
-        return o.get("nombre") or o.get("nombre_en") or f"#{oid}"
-
-    def receta(self, receta_id) -> dict | None:
-        return self._por_id.get(int(receta_id))
-
-    def recetas_que_producen(self, oid) -> list:
-        return self._productores.get(int(oid), [])
-
-    def es_intermedio(self, oid) -> bool:
-        return int(oid) in self._ingredientes
-
-    def nombre_profesion(self, clave) -> str:
-        return self.profesiones.get(clave) or PROFESIONES.get(clave) or str(clave or "")
-
-    def recetas_de(self, faccion=None) -> list:
-        if not faccion:
-            return list(self.recetas)
-        return [r for r in self.recetas if r.get("faccion") in (faccion, "ambas", None)]
-
-    def buscar(self, texto: str, limite: int = 10) -> list[dict]:
-        texto = (texto or "").strip()
-        if not texto:
-            return []
-        if texto.isdigit() and self.objeto(texto):
-            return [self._resultado(int(texto), 100)]
-        res = None
-        if not isinstance(self.cat, dict) and hasattr(self.cat, "buscar"):
-            try:
-                res = self.cat.buscar(texto, limite=limite)
-            except Exception as e:  # noqa: BLE001
-                log.warning("Catalogo.buscar failed (%s); using the basic search", e)
-        if res is None:
-            res = self._buscar_basico(texto, limite)
-        salida = []
-        for r in res:
-            if isinstance(r, dict):
-                oid, punt = r.get("id") or r.get("objeto_id"), r.get("puntuacion", r.get("score", 0))
-            else:
-                oid, punt = r[0], (r[2] if len(r) > 2 else 0)
-            salida.append(self._resultado(int(oid), punt))
-        return salida
-
-    def _resultado(self, oid, puntuacion) -> dict:
-        o = self.objeto(oid)
-        return {"id": oid, "nombre": self.nombre(oid), "nombre_en": o.get("nombre_en"),
-                "puntuacion": round(float(puntuacion or 0), 1), "vinculado": o.get("vinculado"),
-                "comerciable": o.get("comerciable"), "fabricable": bool(self.recetas_que_producen(oid))}
-
-    def _buscar_basico(self, texto, limite):
-        from rapidfuzz import fuzz, process
-
-        if self._indice is None:
-            self._indice = {}
-            for k, o in self.objetos.items():
-                self._indice[int(k)] = normalizar(o.get("nombre") or o.get("nombre_en") or "")
-        q = normalizar(texto)
-        exactos = [(oid, n, 100.0) for oid, n in self._indice.items() if q and q in n]
-        exactos.sort(key=lambda t: len(t[1]))
-        resto = process.extract(q, self._indice, scorer=fuzz.WRatio, limit=limite)
-        vistos, salida = set(), []
-        for oid, _, punt in exactos[:limite]:
-            vistos.add(oid)
-            salida.append((oid, None, punt))
-        for _, punt, oid in resto:
-            if oid not in vistos:
-                salida.append((oid, None, punt))
-        return salida[:limite]
-
-
-# ---------------------------------------------------------------------------
 # services
 # ---------------------------------------------------------------------------
 
 class Servicios:
-    REINTENTO_S = 5.0          # don't retry importing a missing module more often than this
     TOP_ESCENARIOS = 15        # dashboard rows with the "sell at target price" scenario
     TTL_OBJETIVO_S = 300
 
-    def __init__(self, catalogo=None, repo=None, motor=None, precio_objetivo=None,
-                 modulos_captura: dict | None = None, ruta_sesiones: Path | None = None):
-        self._cat = VistaCatalogo(catalogo) if catalogo is not None else None
+    def __init__(self, catalogo: Catalogo | None = None, repo=None, ruta_sesiones: Path | None = None):
+        self._cat = catalogo
         self._repo = repo
-        self._mods: dict[str, Any] = {}
-        if motor is not None:
-            self._mods["motor"] = motor
-        if precio_objetivo is not None:
-            self._mods["precio_objetivo"] = precio_objetivo
-        self._mods.update(modulos_captura or {})
-        self._inyectados = set(self._mods) | ({"catalogo"} if catalogo is not None else set()) \
-            | ({"repo"} if repo is not None else set())
-        self.errores: dict[str, str] = {}
-        self._ultimo_intento: dict[str, float] = {}
         self._lock = threading.RLock()
         self._cache_objetivo: dict[tuple, tuple[float, dict]] = {}
         self.grabacion = None
@@ -369,101 +189,43 @@ class Servicios:
         self.segundo_plano = True   # process videos/images in a thread (tests turn this off)
         self._cargar_sesiones()
 
-    # --- lazy loading ------------------------------------------------------
-    def _puede_reintentar(self, componente) -> bool:
-        ultimo = self._ultimo_intento.get(componente)
-        return ultimo is None or time.monotonic() - ultimo >= self.REINTENTO_S
-
-    def _fallo(self, componente, e: BaseException) -> NoDisponible:
-        self._ultimo_intento[componente] = time.monotonic()
-        if isinstance(e, NoDisponible):
-            err = e
-        elif isinstance(e, ModuleNotFoundError) and e.name and e.name.startswith("app"):
-            err = NoDisponible(componente)
-        else:
-            err = NoDisponible(componente, f"{type(e).__name__}: {e}")
-        self.errores[componente] = str(err)
-        log.warning("%s", err)
-        return err
-
+    # --- catalog and database (loaded on first use) -------------------------
     @property
-    def cat(self) -> VistaCatalogo:
-        if self._cat is not None:
-            return self._cat
-        if not self._puede_reintentar("catalogo") and "catalogo" in self.errores:
-            raise NoDisponible("catalogo")
-        with self._lock:
-            if self._cat is None:
-                try:
+    def cat(self) -> Catalogo:
+        if self._cat is None:
+            with self._lock:
+                if self._cat is None:
                     try:
-                        mod = importlib.import_module("app.catalogo")
-                        cat = mod.cargar_catalogo()
-                    except ModuleNotFoundError as e:
-                        if not (e.name or "").startswith("app") or not RUTA_CATALOGO.exists():
-                            raise
-                        # catalogo.py doesn't exist yet but the JSON does: read it as is
-                        cat = json.loads(RUTA_CATALOGO.read_text(encoding="utf-8"))
-                        self.errores["catalogo"] = ("app/catalogo.py aún no existe: se lee data/catalogo.json "
-                                                    "directamente (búsqueda básica).")
-                    self._cat = VistaCatalogo(cat)
-                    if not isinstance(cat, dict):
-                        self.errores.pop("catalogo", None)
-                except FileNotFoundError as e:
-                    raise self._fallo("catalogo", NoDisponible("catalogo", f"no existe {e.filename or 'data/catalogo.json'}")) from e
-                except Exception as e:  # noqa: BLE001
-                    raise self._fallo("catalogo", e) from e
+                        self._cat = cargar_catalogo()
+                    except FileNotFoundError as e:
+                        raise NoDisponible("catalogo", f"no existe {e.filename or 'data/catalogo.json'}") from e
+                    except Exception as e:  # noqa: BLE001
+                        raise NoDisponible("catalogo", f"{type(e).__name__}: {e}") from e
         return self._cat
 
     @property
     def repo(self):
-        if self._repo is not None:
-            return self._repo
-        if not self._puede_reintentar("repo") and "repo" in self.errores:
-            raise NoDisponible("repo")
-        with self._lock:
-            if self._repo is None:
-                try:
-                    self._repo = importlib.import_module("app.db").obtener_repositorio()
-                    self.errores.pop("repo", None)
-                except Exception as e:  # noqa: BLE001
-                    raise self._fallo("repo", e) from e
+        if self._repo is None:
+            with self._lock:
+                if self._repo is None:
+                    try:
+                        self._repo = obtener_repositorio()
+                    except Exception as e:  # noqa: BLE001
+                        raise NoDisponible("repo", f"{type(e).__name__}: {e}") from e
         return self._repo
 
-    def modulo(self, componente: str):
-        if componente in self._mods:
-            if self._mods[componente] is None:  # marked as missing (tests)
-                raise NoDisponible(componente)
-            return self._mods[componente]
-        if not self._puede_reintentar(componente) and componente in self.errores:
-            raise NoDisponible(componente)
+    def _cat_o_none(self) -> Catalogo | None:
         try:
-            mod = importlib.import_module(_MODULOS[componente])
-        except Exception as e:  # noqa: BLE001
-            raise self._fallo(componente, e) from e
-        self._mods[componente] = mod
-        self.errores.pop(componente, None)
-        return mod
-
-    def disponible(self, componente: str) -> bool:
-        try:
-            if componente == "catalogo":
-                self.cat
-            elif componente == "repo":
-                self.repo
-            else:
-                self.modulo(componente)
-            return True
+            return self.cat
         except NoDisponible:
-            return False
+            return None
 
-    def clase_lectura(self):
-        if "repo" in self._inyectados:
-            clase = getattr(self._repo, "Lectura", None)
-            return clase or LecturaLocal
+    def _error_de(self, componente: str) -> str | None:
         try:
-            return importlib.import_module("app.db").Lectura
-        except Exception:  # noqa: BLE001
-            return LecturaLocal
+            getattr(self, "cat" if componente == "catalogo" else componente)
+            return None
+        except NoDisponible as e:
+            return str(e)
 
     # --- startup -------------------------------------------------------------
     def arranque(self) -> dict:
@@ -480,12 +242,9 @@ class Servicios:
         except Exception as e:  # noqa: BLE001
             info["repo"] = f"No se pudo subir la cola offline: {e}"
         try:
-            temporales = self.modulo("temporales")
-            r = llamar(temporales.limpiar_verificados, self.repo)
-            info["temporales_borrados"] = limpio(r)
-            tope = self._ajustes_base().get("tope_tmp_mb", 500)
-            if hasattr(temporales, "aplicar_tope"):
-                info["tope"] = limpio(llamar(temporales.aplicar_tope, tope, repo=self.repo))
+            info["temporales_borrados"] = limpio(temporales.limpiar_verificados(self.repo))
+            tope = self.ajustes().get("tope_tmp_mb", 500)
+            info["tope"] = limpio(temporales.aplicar_tope(tope, repo=self.repo))
         except NoDisponible as e:
             info["temporales"] = str(e)
         except Exception as e:  # noqa: BLE001
@@ -497,21 +256,16 @@ class Servicios:
 
     # --- status ----------------------------------------------------------------
     def estado(self) -> dict:
-        componentes = {}
-        for nombre in ("catalogo", "repo", "motor", "precio_objetivo", "ocr", "parser",
-                       "grabacion", "video", "calibracion", "temporales"):
-            ok = self.disponible(nombre)
-            componentes[nombre] = {"ok": ok, "mensaje": self.errores.get(nombre) if not ok or nombre == "catalogo" else None}
+        errores = {k: self._error_de(k) for k in ("catalogo", "repo")}
+        componentes = {k: {"ok": errores.get(k) is None, "mensaje": errores.get(k)} for k in COMPONENTES}
         salida: dict[str, Any] = {"componentes": componentes, "arranque": self.arranque_info}
-        if componentes["catalogo"]["ok"]:
+        if errores["catalogo"] is None:
             c = self.cat
-            salida["catalogo"] = {"recetas": len(c.recetas), "objetos": len(c.objetos), **c.meta,
-                                  "aviso": self.errores.get("catalogo")}
-        if componentes["repo"]["ok"]:
-            r = self.repo
-            salida["backend"] = getattr(r, "backend", "?")
+            salida["catalogo"] = {"recetas": len(c.recetas), "objetos": len(c.objetos), **c.meta}
+        if errores["repo"] is None:
+            salida["backend"] = self.repo.backend
             try:
-                salida["en_cola"] = int(r.num_pendientes()) if hasattr(r, "num_pendientes") else self._contar_cola()
+                salida["en_cola"] = int(self.repo.num_pendientes())
             except Exception as e:  # noqa: BLE001
                 salida["en_cola"] = None
                 salida["error_cola"] = str(e)
@@ -530,18 +284,30 @@ class Servicios:
             return 0
 
     def _estado_temporales(self) -> dict:
-        n, total = 0, 0
-        if DIR_TMP.exists():
-            for p in DIR_TMP.rglob("*"):
-                if p.is_file():
-                    n += 1
-                    total += p.stat().st_size
-        tope = None
+        archivos = [p for p in DIR_TMP.rglob("*") if p.is_file()] if DIR_TMP.exists() else []
         try:
-            tope = self._ajustes_base().get("tope_tmp_mb")
+            tope = self.ajustes().get("tope_tmp_mb")
         except NoDisponible:
-            pass
-        return {"archivos": n, "mb": round(total / 1_048_576, 1), "tope_mb": tope}
+            tope = None
+        return {"archivos": len(archivos), "mb": round(sum(p.stat().st_size for p in archivos) / 1_048_576, 1),
+                "tope_mb": tope}
+
+    # --- catalog search -----------------------------------------------------------
+    def buscar(self, texto: str, limite: int = 10) -> list[dict]:
+        texto = (texto or "").strip()
+        if not texto:
+            return []
+        cat = self.cat
+        if texto.isdigit() and cat.objeto(texto):
+            return [self._resultado(int(texto), 100)]
+        return [self._resultado(oid, punt) for oid, _, punt in cat.buscar(texto, limite=limite)]
+
+    def _resultado(self, oid: int, puntuacion) -> dict:
+        cat = self.cat
+        o = cat.objeto(oid) or {}
+        return {"id": oid, "nombre": cat.nombre(oid), "nombre_en": o.get("nombre_en"),
+                "puntuacion": round(float(puntuacion or 0), 1), "vinculado": o.get("vinculado"),
+                "comerciable": o.get("comerciable"), "fabricable": bool(cat.recetas_que_producen(oid, con_combo=True))}
 
     # --- profiles / servers ---------------------------------------------------
     def servidores(self) -> list[dict]:
@@ -621,14 +387,9 @@ class Servicios:
     # --- levels and inventory ---------------------------------------------------
     def niveles(self, perfil_id) -> dict:
         actuales = self.repo.niveles(perfil_id)
-        return {k: int(actuales.get(k, 1)) for k in self._claves_profesion()} | {
-            k: v for k, v in actuales.items() if k not in self._claves_profesion()}
-
-    def _claves_profesion(self):
-        try:
-            return list(self.cat.profesiones)
-        except NoDisponible:
-            return list(PROFESIONES)
+        cat = self._cat_o_none()
+        claves = list(cat.profesiones if cat else PROFESIONES)
+        return {k: int(actuales.get(k, 1)) for k in claves} | {k: v for k, v in actuales.items() if k not in claves}
 
     def guardar_niveles(self, perfil_id, niveles: dict) -> dict:
         self._exigir_perfil(perfil_id)
@@ -644,15 +405,10 @@ class Servicios:
             raise LookupError("Ese perfil no existe.")
 
     def inventario(self, perfil_id) -> list[dict]:
-        filas = self.repo.inventario_detalle(perfil_id)
-        try:
-            cat = self.cat
-        except NoDisponible:
-            cat = None
-        salida = []
-        for f in filas:
-            oid = int(f["objeto_id"])
-            salida.append({**f, "objeto_id": oid, "nombre": cat.nombre(oid) if cat else f"#{oid}"})
+        cat = self._cat_o_none()
+        salida = [{**f, "objeto_id": int(f["objeto_id"]),
+                   "nombre": cat.nombre(f["objeto_id"]) if cat else f"#{f['objeto_id']}"}
+                  for f in self.repo.inventario_detalle(perfil_id)]
         salida.sort(key=lambda f: (f.get("ubicacion") or "", normalizar(f["nombre"])))
         return salida
 
@@ -672,7 +428,6 @@ class Servicios:
 
     def interpretar_pegado(self, texto: str) -> list[dict]:
         """Text «name: quantity» (one line per item) → rows matched against the catalog."""
-        cat = self.cat
         salida = []
         for n, linea in enumerate((texto or "").splitlines(), 1):
             linea = linea.strip().strip("-•*").strip()
@@ -683,28 +438,25 @@ class Servicios:
                 nombre, cantidad = m.group("nombre").strip(), _entero_texto(m.group("cant"))
             else:
                 nombre, cantidad = linea, None
-            candidatos = cat.buscar(nombre, limite=3)
+            candidatos = self.buscar(nombre, limite=3)
             mejor = candidatos[0] if candidatos else None
-            ok = bool(mejor and mejor["puntuacion"] >= 85)
+            aceptado = bool(mejor and mejor["puntuacion"] >= 70)
             salida.append({
                 "linea": n, "texto": linea, "nombre_leido": nombre, "cantidad": cantidad,
-                "objeto_id": mejor["id"] if mejor and mejor["puntuacion"] >= 70 else None,
-                "nombre": mejor["nombre"] if mejor and mejor["puntuacion"] >= 70 else None,
+                "objeto_id": mejor["id"] if aceptado else None,
+                "nombre": mejor["nombre"] if aceptado else None,
                 "puntuacion": mejor["puntuacion"] if mejor else 0,
-                "dudosa": not ok or cantidad is None,
+                "dudosa": not (mejor and mejor["puntuacion"] >= 85) or cantidad is None,
                 "candidatos": candidatos,
             })
         return salida
 
     # --- settings and NPC prices --------------------------------------------------
-    def _ajustes_base(self) -> dict:
+    def ajustes(self) -> dict:
         return {**AJUSTES_POR_DEFECTO, **{k: v for k, v in (self.repo.ajustes() or {}).items() if v is not None}}
 
-    def ajustes(self) -> dict:
-        return self._ajustes_base()
-
     def ajustes_efectivos(self, servidor: dict | None) -> dict:
-        aj = self._ajustes_base()
+        aj = self.ajustes()
         for k in ("comision_registro", "impuesto_venta"):
             if servidor and servidor.get(k) is not None:
                 aj[k] = float(servidor[k])
@@ -713,9 +465,9 @@ class Servicios:
     def guardar_ajustes(self, datos: dict) -> dict:
         nuevos = {}
         for k, v in (datos or {}).items():
-            if k not in _AJUSTES_EDITABLES:
+            tipo = _AJUSTES_EDITABLES.get(k)
+            if tipo is None:
                 continue
-            tipo = _AJUSTES_EDITABLES[k]
             if tipo is str:
                 v = str(v)
                 if k in _OPCIONES and v not in _OPCIONES[k]:
@@ -734,18 +486,15 @@ class Servicios:
         return self.ajustes()
 
     def precios_npc(self) -> list[dict]:
-        repo_npc = {int(k): float(v) for k, v in (self.repo.precios_npc() or {}).items()}
-        try:
-            cat = self.cat
-        except NoDisponible:
-            cat = None
+        manuales = self._precios_npc_dict()
+        cat = self._cat_o_none()
         filas = {}
         if cat:
             for k, o in cat.objetos.items():
                 if o.get("precio_npc") is not None:
                     filas[int(k)] = {"objeto_id": int(k), "nombre": cat.nombre(k), "precio": float(o["precio_npc"]),
                                      "precio_catalogo": float(o["precio_npc"]), "origen": "catálogo"}
-        for oid, p in repo_npc.items():
+        for oid, p in manuales.items():
             fila = filas.setdefault(oid, {"objeto_id": oid, "nombre": cat.nombre(oid) if cat else f"#{oid}",
                                           "precio_catalogo": None})
             fila.update(precio=p, origen="manual")
@@ -798,25 +547,20 @@ class Servicios:
         oid = int(objeto_id)
         hist = self.historico(servidor_id, oid, dias)
         actual = self.precios(servidor_id).get(oid)
-        ctx_servidor = next((s for s in self.repo.listar_servidores() if s["id"] == servidor_id), None)
-        aj = self.ajustes_efectivos(ctx_servidor)
-        salida: dict[str, Any] = {
-            "objeto": {"id": oid, "nombre": cat.nombre(oid), **cat.objeto(oid)},
+        servidor = next((s for s in self.repo.listar_servidores() if s["id"] == servidor_id), None)
+        recetas = cat.recetas_que_producen(oid, con_combo=True)
+        return limpio({
+            "objeto": {"id": oid, "nombre": cat.nombre(oid), **(cat.objeto(oid) or {})},
             "actual": self.lectura_dict(actual),
             "historico": [self.lectura_dict(l) for l in hist],
             "dias": dias,
-            "fabricable": bool(cat.recetas_que_producen(oid)),
+            "fabricable": bool(recetas),
             "recetas": [{"id": r["id"], "profesion": r["profesion"], "nivel": r.get("nivel"),
-                         "nombre": cat.nombre(r["producto"])} for r in cat.recetas_que_producen(oid)],
-        }
-        try:
-            po = self.modulo("precio_objetivo")
-            salida["volumen_dia"] = po.volumen_estimado(hist)
-            salida["objetivo_venta"] = po.precio_objetivo_venta(hist, actual, aj)
-            salida["objetivo_compra"] = po.precio_objetivo_compra(hist, actual)
-        except NoDisponible as e:
-            salida["aviso_objetivo"] = str(e)
-        return limpio(salida)
+                         "nombre": cat.nombre(r["producto"])} for r in recetas],
+            "volumen_dia": precio_objetivo.volumen_estimado(hist),
+            "objetivo_venta": precio_objetivo.precio_objetivo_venta(hist, actual, self.ajustes_efectivos(servidor)),
+            "objetivo_compra": precio_objetivo.precio_objetivo_compra(hist, actual),
+        })
 
     def guardar_manual(self, datos: dict) -> dict:
         datos = dict(datos or {})
@@ -824,7 +568,7 @@ class Servicios:
         if not servidor_id:
             raise ValueError("Falta el servidor: elige un perfil con servidor.")
         oid = _num(datos.get("objeto_id"), int, "objeto", permitir_none=False)
-        self.cat.objeto(oid)  # checks that the catalog loads
+        cat = self.cat  # checks that the catalog loads
         ofertas = self._ofertas_de(datos.get("ofertas"), datos.get("ofertas_texto"))
         precio = _num(datos.get("precio_min"), float, "precio", 0)
         cantidad = _num(datos.get("cantidad_total"), int, "cantidad", 0)
@@ -835,14 +579,12 @@ class Servicios:
             anuncios = anuncios if anuncios is not None else len(ofertas)
         if precio is None:
             raise ValueError("Indica al menos el precio mínimo.")
-        fecha = utc(datos.get("fecha")) or ahora()
-        lectura = self.clase_lectura()(servidor_id=servidor_id, objeto_id=oid, fecha=fecha, precio_min=precio,
-                                       cantidad_total=cantidad, num_anuncios=anuncios, ofertas=ofertas,
-                                       fuente="manual")
+        lectura = Lectura(servidor_id=servidor_id, objeto_id=oid, fecha=utc(datos.get("fecha")) or ahora(),
+                          precio_min=precio, cantidad_total=cantidad, num_anuncios=anuncios, ofertas=ofertas,
+                          fuente="manual")
         res = self.repo.guardar_lecturas([lectura], None)
         self._invalidar(servidor_id)
-        return limpio({"ids": campo(res, "ids", []), "en_cola": campo(res, "en_cola", False),
-                       "lectura": self.lectura_dict(lectura, self.cat)})
+        return limpio({"ids": res.ids, "en_cola": res.en_cola, "lectura": self.lectura_dict(lectura, cat)})
 
     @staticmethod
     def _ofertas_de(ofertas, texto) -> list[tuple[float, int]]:
@@ -857,24 +599,18 @@ class Servicios:
             if len(nums) < 2:
                 raise ValueError(f"Cada línea del libro de ofertas necesita «precio cantidad»: {linea!r}")
             salida.append((float(_entero_texto(nums[0]) or 0), int(_entero_texto(nums[1]) or 0)))
-        salida = [(p, c) for p, c in salida if p > 0 and c > 0]
-        return sorted(salida)
+        return sorted((p, c) for p, c in salida if p > 0 and c > 0)
 
     def _invalidar(self, servidor_id):
         for k in [k for k in self._cache_objetivo if k[0] == servidor_id]:
             self._cache_objetivo.pop(k, None)
 
-    def _objetivo_venta(self, servidor_id, oid, actual, ajustes) -> dict | None:
+    def _objetivo_venta(self, servidor_id, oid, actual, ajustes) -> dict:
         clave = (servidor_id, int(oid))
         guardado = self._cache_objetivo.get(clave)
         if guardado and time.monotonic() - guardado[0] < self.TTL_OBJETIVO_S:
             return guardado[1]
-        try:
-            po = self.modulo("precio_objetivo")
-        except NoDisponible:
-            return None
-        hist = self.historico(servidor_id, oid, 30)
-        res = po.precio_objetivo_venta(hist, actual, ajustes)
+        res = precio_objetivo.precio_objetivo_venta(self.historico(servidor_id, oid, 30), actual, ajustes)
         self._cache_objetivo[clave] = (time.monotonic(), res)
         return res
 
@@ -882,17 +618,16 @@ class Servicios:
     def _nivel(self, ctx, profesion) -> int:
         return int(ctx["niveles"].get(profesion, ctx["ajustes"].get("nivel_por_defecto", 1)))
 
-    def _analizar(self, receta, ctx, precios, npc, intentos=1, inventario=True):
-        motor = self.modulo("motor")
-        return llamar(motor.analizar_receta, receta, self.cat.cat, precios, ctx["ajustes"],
-                      self._nivel(ctx, receta["profesion"]),
-                      ctx["inventario"] if inventario else None, intentos,
-                      niveles=ctx["niveles"], faccion=ctx["faccion"], precios_npc=npc)
+    def _analizar(self, receta, ctx, precios, npc, intentos=1, inventario=None):
+        """Engine analysis; `inventario` defaults to the profile's (pass {} to ignore it)."""
+        inv = ctx["inventario"] if inventario is None else inventario
+        return calculo.analizar_receta(receta, self.cat, precios, ctx["ajustes"], self._nivel(ctx, receta["profesion"]),
+                                       inv or None, intentos, niveles=ctx["niveles"], faccion=ctx["faccion"],
+                                       precios_npc=npc)
 
     def oportunidades(self, perfil_id=None, profesion=None, inversion_max=None, margen_min=None,
                       incluir_intermedios=True, usar_inventario=True, limite=50) -> dict:
         cat = self.cat
-        motor = self.modulo("motor")
         ctx = self.contexto(perfil_id)
         base = {"perfil": ctx["perfil"], "servidor": ctx["servidor"], "filas": [], "avisos": []}
         if not ctx["perfil"]:
@@ -909,69 +644,47 @@ class Servicios:
         filtros = {"profesion": profesion or None, "inversion_max": inversion_max, "margen_min": margen_min,
                    "incluir_intermedios": bool(incluir_intermedios), "limite": limite}
         inventario = ctx["inventario"] if usar_inventario else None
-        res = llamar(motor.mejores_oportunidades, cat.cat, precios, ctx["ajustes"], ctx["niveles"],
-                     ctx["faccion"], inventario, filtros, precios_npc=npc)
-        filas = []
-        for i, a in enumerate(res[: int(limite or 50)]):
-            fila = self._fila_panel(a, ctx, precios, npc, inventario, con_escenario=i < self.TOP_ESCENARIOS)
-            filas.append(fila)
-        base["filas"] = filas
+        res = calculo.mejores_oportunidades(cat, precios, ctx["ajustes"], ctx["niveles"], ctx["faccion"],
+                                            inventario, filtros, precios_npc=npc)
+        base["filas"] = [self._fila_panel(a, ctx, precios, npc, inventario, con_escenario=i < self.TOP_ESCENARIOS)
+                         for i, a in enumerate(res[: int(limite or 50)])]
         base["n_precios"] = len(precios)
         return limpio(base)
 
+    _CAMPOS_PANEL = ("receta_id", "producto", "nombre", "profesion", "nivel_receta", "beneficio_intento", "margen",
+                     "inversion", "beneficio_total", "coste_intento", "precio_venta", "precio_equilibrio", "p_exito",
+                     "p_combo", "items_esperados", "es_intermedio", "antiguedad_precios_horas", "mensaje_inventario")
+
     def _fila_panel(self, a: dict, ctx, precios, npc, inventario, con_escenario=True) -> dict:
-        cat = self.cat
-        receta = cat.receta(a.get("receta_id")) if a.get("receta_id") is not None else None
-        n = int(a.get("intentos_recomendados") or a.get("intentos") or 1)
-        fila = {
-            "receta_id": a.get("receta_id"),
-            "producto": a.get("producto"),
-            "nombre": a.get("nombre") or (cat.nombre(a["producto"]) if a.get("producto") else "?"),
-            "profesion": a.get("profesion"),
-            "profesion_nombre": cat.nombre_profesion(a.get("profesion")),
-            "nivel_receta": a.get("nivel_receta"),
-            "beneficio_intento": a.get("beneficio_intento"),
-            "margen": a.get("margen"),
+        n = int(a["intentos_recomendados"])
+        fila = {k: a.get(k) for k in self._CAMPOS_PANEL} | {
+            "profesion_nombre": self.cat.nombre_profesion(a["profesion"]),
             "intentos_recomendados": n,
-            "inversion": a.get("inversion", a.get("coste_total")),
-            "beneficio_total": a.get("beneficio_total"),
-            "coste_intento": a.get("coste_intento"),
-            "precio_venta": a.get("precio_venta"),
-            "precio_equilibrio": a.get("precio_equilibrio"),
-            "p_exito": a.get("p_exito"),
-            "p_combo": a.get("p_combo"),
-            "items_esperados": a.get("items_esperados"),
-            "es_intermedio": a.get("es_intermedio"),
-            "antiguedad_precios_horas": a.get("antiguedad_precios_horas"),
-            "semaforo": semaforo(a.get("antiguedad_precios_horas")),
-            "avisos": a.get("avisos") or [],
-            "mensaje_inventario": a.get("mensaje_inventario"),
+            "semaforo": semaforo(a["antiguedad_precios_horas"]),
+            "avisos": a["avisos"],
             "escenario_objetivo": None,
         }
-        if con_escenario and receta is not None and a.get("producto") is not None:
+        if con_escenario:
             try:
-                fila["escenario_objetivo"] = self._escenario_objetivo(receta, a, ctx, precios, npc, n, inventario)
-            except NoDisponible:
-                pass
+                fila["escenario_objetivo"] = self._escenario_objetivo(
+                    self.cat.receta(a["receta_id"]), a, ctx, precios, npc, n, inventario or {})
             except Exception as e:  # noqa: BLE001
-                log.warning("Target scenario for %s failed: %s", a.get("receta_id"), e)
+                log.warning("Target scenario for %s failed: %s", a["receta_id"], e)
         return fila
 
-    def _escenario_objetivo(self, receta, a, ctx, precios, npc, n, inventario) -> dict | None:
+    def _escenario_objetivo(self, receta, a, ctx, precios, npc, n, inventario) -> dict:
+        """Same analysis if the product were listed at its target price instead of right now."""
         prod = int(a["producto"])
-        po = self._objetivo_venta(ctx["servidor_id"], prod, precios.get(prod), ctx["ajustes"])
-        if not po or po.get("precio_recomendado") is None:
-            return {"estado": (po or {}).get("estado", "sin_datos"), "aviso": (po or {}).get("aviso")}
-        rebaja = float(ctx["ajustes"].get("rebaja_listado", 1))
-        precios2 = dict(precios)
         actual = precios.get(prod)
-        precios2[prod] = {"precio_min": float(po["precio_recomendado"]) + rebaja, "ofertas": [],
-                          "fecha": campo(actual, "fecha") or ahora(), "cantidad_total": campo(actual, "cantidad_total"),
-                          "num_anuncios": campo(actual, "num_anuncios")}
-        motor = self.modulo("motor")
-        b = llamar(motor.analizar_receta, receta, self.cat.cat, precios2, ctx["ajustes"],
-                   self._nivel(ctx, receta["profesion"]), inventario, n,
-                   niveles=ctx["niveles"], faccion=ctx["faccion"], precios_npc=npc)
+        po = self._objetivo_venta(ctx["servidor_id"], prod, actual, ctx["ajustes"])
+        if po.get("precio_recomendado") is None:
+            return {"estado": po.get("estado", "sin_datos"), "aviso": po.get("aviso")}
+        rebaja = float(ctx["ajustes"].get("rebaja_listado", 1))
+        precios_objetivo = {**precios, prod: {
+            "precio_min": float(po["precio_recomendado"]) + rebaja, "ofertas": [],
+            "fecha": campo(actual, "fecha") or ahora(), "cantidad_total": campo(actual, "cantidad_total"),
+            "num_anuncios": campo(actual, "num_anuncios")}}
+        b = self._analizar(receta, ctx, precios_objetivo, npc, n, inventario)
         return {
             "estado": po.get("estado"), "aviso": po.get("aviso"),
             "precio_ya": a.get("precio_venta"), "precio_objetivo": po.get("precio_recomendado"),
@@ -986,17 +699,16 @@ class Servicios:
         try:
             ctx = self.contexto(perfil_id)
         except NoDisponible:
-            ctx = {"faccion": None, "niveles": {}, "ajustes": AJUSTES_POR_DEFECTO}
+            ctx = {"faccion": None, "niveles": {}}
         q = normalizar(texto) if texto else None
         filas = []
         for r in cat.recetas_de(ctx["faccion"]):
             if profesion and r["profesion"] != profesion:
                 continue
             nombre = cat.nombre(r["producto"])
-            if q and q not in normalizar(nombre) and q not in normalizar(cat.objeto(r["producto"]).get("nombre_en") or ""):
+            if q and q not in normalizar(nombre) and q not in normalizar((cat.objeto(r["producto"]) or {}).get("nombre_en")):
                 continue
-            nivel = int(ctx["niveles"].get(r["profesion"], 1))
-            desbloqueada = nivel >= int(r.get("nivel") or 1)
+            desbloqueada = int(ctx["niveles"].get(r["profesion"], 1)) >= int(r.get("nivel") or 1)
             if solo_desbloqueadas and not desbloqueada:
                 continue
             filas.append({"id": r["id"], "nombre": nombre, "producto": r["producto"], "profesion": r["profesion"],
@@ -1006,54 +718,52 @@ class Servicios:
         filas.sort(key=lambda f: (f["profesion"], f["nivel"] or 0, normalizar(f["nombre"])))
         return limpio({"total": len(filas), "filas": filas[:limite], "faccion": ctx["faccion"]})
 
-    def detalle_receta(self, receta_id, perfil_id=None, intentos=1) -> dict:
-        cat = self.cat
-        receta = cat.receta(receta_id)
+    def _receta(self, receta_id) -> dict:
+        receta = self.cat.receta(receta_id)
         if receta is None:
             raise LookupError("Esa receta no existe en el catálogo.")
-        salida: dict[str, Any] = {
+        return receta
+
+    def detalle_receta(self, receta_id, perfil_id=None, intentos=1) -> dict:
+        cat = self.cat
+        receta = self._receta(receta_id)
+        intentos = max(1, int(intentos))
+        ctx = self.contexto(perfil_id)
+        precios = self.precios(ctx["servidor_id"])
+        npc = self._precios_npc_dict()
+        a = self._analizar(receta, ctx, precios, npc, intentos)
+        salida = {
             "receta": {**receta, "nombre": cat.nombre(receta["producto"]),
                        "profesion_nombre": cat.nombre_profesion(receta["profesion"]),
                        "ingredientes_nombres": [{"id": i, "nombre": cat.nombre(i), "cantidad": q}
                                                 for i, q in receta.get("ingredientes") or []],
                        "producto_combo_nombre": cat.nombre(receta["producto_combo"]) if receta.get("producto_combo") else None},
+            "perfil": ctx["perfil"],
+            "analisis": a,
+            "semaforo": semaforo(a.get("antiguedad_precios_horas")),
+            "arbol": self._arbol(receta, ctx, precios, npc, set(), 0),
         }
-        ctx = self.contexto(perfil_id)
-        salida["perfil"] = ctx["perfil"]
-        precios = self.precios(ctx["servidor_id"])
-        npc = self._precios_npc_dict()
-        try:
-            a = self._analizar(receta, ctx, precios, npc, max(1, int(intentos)))
-        except NoDisponible as e:
-            salida["aviso"] = str(e)
-            return limpio(salida)
-        salida["analisis"] = a
-        salida["semaforo"] = semaforo(a.get("antiguedad_precios_horas"))
-        salida["arbol"] = self._arbol(receta, ctx, precios, npc, set(), 0)
         if ctx["servidor_id"]:
-            try:
-                salida["escenario_objetivo"] = self._escenario_objetivo(
-                    receta, a, ctx, precios, npc, max(1, int(intentos)), ctx["inventario"])
-            except NoDisponible:
-                pass
+            salida["escenario_objetivo"] = self._escenario_objetivo(receta, a, ctx, precios, npc, intentos,
+                                                                    ctx["inventario"])
         return limpio(salida)
 
     def _coste_fabricar(self, oid, ctx, precios, npc):
-        """Best unlocked recipe for crafting `oid`: (unit cost, recipe, analysis)."""
-        mejor = (None, None, None)
-        for r in self.cat.recetas_que_producen(oid):
+        """Best unlocked recipe for crafting `oid`: (unit cost, recipe)."""
+        mejor = (None, None)
+        for r in self.cat.recetas_que_producen(oid, con_combo=True):
             if ctx["faccion"] and r.get("faccion") not in (ctx["faccion"], "ambas", None):
                 continue
             if self._nivel(ctx, r["profesion"]) < int(r.get("nivel") or 1):
                 continue
-            a = self._analizar(r, ctx, precios, npc, 1, inventario=False)
+            a = self._analizar(r, ctx, precios, npc, 1, inventario={})
             salidas = a.get("salidas_esperadas") or {}
-            unidades = salidas.get(int(oid), salidas.get(str(oid))) or (a.get("items_esperados") if int(r["producto"]) == int(oid) else 0)
+            unidades = salidas.get(int(oid)) or (a.get("items_esperados") if int(r["producto"]) == int(oid) else 0)
             if a.get("coste_intento") is None or not unidades:
                 continue
             unit = a["coste_intento"] / unidades
             if mejor[0] is None or unit < mejor[0]:
-                mejor = (unit, r, a)
+                mejor = (unit, r)
         return mejor
 
     def _arbol(self, receta, ctx, precios, npc, visitados: set, profundidad: int) -> list[dict]:
@@ -1063,13 +773,13 @@ class Servicios:
         for ing, q in receta.get("ingredientes") or []:
             ing = int(ing)
             mercado = campo(precios.get(ing), "precio_min")
-            npc_p = npc.get(ing, cat.objeto(ing).get("precio_npc"))
+            npc_p = npc.get(ing, (cat.objeto(ing) or {}).get("precio_npc"))
             nodo = {"id": ing, "nombre": cat.nombre(ing), "cantidad": q, "precio_mercado": mercado,
                     "precio_npc": npc_p, "coste_fabricar": None, "receta_id": None, "hijos": [],
                     "en_inventario": ctx["inventario"].get(ing, 0),
                     "antiguedad_horas": horas_desde(campo(precios.get(ing), "fecha"))}
-            if ing not in visitados and profundidad < 5 and cat.recetas_que_producen(ing):
-                coste, sub, _ = self._coste_fabricar(ing, ctx, precios, npc)
+            if ing not in visitados and profundidad < 5 and cat.recetas_que_producen(ing, con_combo=True):
+                coste, sub = self._coste_fabricar(ing, ctx, precios, npc)
                 if sub is not None:
                     nodo.update(coste_fabricar=coste, receta_id=sub["id"],
                                 hijos=self._arbol(sub, ctx, precios, npc, visitados, profundidad + 1))
@@ -1077,58 +787,47 @@ class Servicios:
                     nodo["nota"] = "Se puede fabricar, pero no tienes la receta desbloqueada o faltan precios."
             opciones = [(v, k) for k, v in (("mercado", mercado), ("npc", npc_p), ("fabricar", nodo["coste_fabricar"]))
                         if v is not None]
-            nodo["mejor"] = min(opciones)[1] if opciones else None
-            nodo["coste_mejor"] = min(opciones)[0] if opciones else None
+            nodo["coste_mejor"], nodo["mejor"] = min(opciones) if opciones else (None, None)
             nodos.append(nodo)
         return nodos
 
     def lista_compra(self, receta_id, perfil_id=None, intentos=None) -> dict:
         cat = self.cat
-        receta = cat.receta(receta_id)
-        if receta is None:
-            raise LookupError("Esa receta no existe en el catálogo.")
+        receta = self._receta(receta_id)
         ctx = self.contexto(perfil_id)
         precios = self.precios(ctx["servidor_id"])
         npc = self._precios_npc_dict()
         if not intentos:
-            a1 = self._analizar(receta, ctx, precios, npc, 1)
+            maxi = self._analizar(receta, ctx, precios, npc, 1).get("max_intentos_mercado")
             tope = int(ctx["ajustes"].get("tope_intentos", 100))
-            maxi = a1.get("max_intentos_mercado")
             intentos = max(1, min(tope, maxi if maxi is not None else tope))
         intentos = int(intentos)
-        comprar: dict[int, dict] = {}
+        comprar: dict[tuple, dict] = {}
         fabricar: list[dict] = []
         inventario_usado: dict[int, int] = {}
         self._expandir_compra(receta, intentos, ctx, precios, npc, comprar, fabricar, inventario_usado, set(), 0)
-        po = None
-        try:
-            po = self.modulo("precio_objetivo")
-        except NoDisponible:
-            pass
         for item in comprar.values():
             item["cantidad"] = math.ceil(item["cantidad"] - 1e-9)
             item["coste"] = item["coste_unit"] * item["cantidad"] if item["coste_unit"] is not None else None
-            if po and ctx["servidor_id"] and item["origen"] == "mercado":
+            if ctx["servidor_id"] and item["origen"] == "mercado":
                 try:
                     hist = self.historico(ctx["servidor_id"], item["id"], 30)
-                    item["comprar_por_debajo_de"] = po.precio_objetivo_compra(hist, precios.get(item["id"])).get("comprar_por_debajo_de")
+                    item["comprar_por_debajo_de"] = precio_objetivo.precio_objetivo_compra(
+                        hist, precios.get(item["id"])).get("comprar_por_debajo_de")
                 except Exception:  # noqa: BLE001
                     item["comprar_por_debajo_de"] = None
         lista = sorted(comprar.values(), key=lambda i: (i["origen"] != "mercado", -(i["coste"] or 0)))
-        total = sum(i["coste"] or 0 for i in lista)
         lineas = [f"Lista de la compra — {cat.nombre(receta['producto'])} × {intentos} intento(s)"]
         for i in lista:
             donde = "tienda NPC" if i["origen"] == "npc" else "mercado"
             precio = f" a ~{i['coste_unit']:,.0f}".replace(",", ".") if i["coste_unit"] is not None else ""
             lineas.append(f"- {i['nombre']}: {i['cantidad']} ({donde}{precio})")
-        for f in fabricar:
-            lineas.append(f"* Fabricar antes: {f['nombre']} × {f['intentos']} intento(s)")
-        for oid, c in inventario_usado.items():
-            lineas.append(f"· Del inventario: {cat.nombre(oid)} × {c}")
+        lineas += [f"* Fabricar antes: {f['nombre']} × {f['intentos']} intento(s)" for f in fabricar]
+        lineas += [f"· Del inventario: {cat.nombre(oid)} × {c}" for oid, c in inventario_usado.items()]
         return limpio({"receta_id": receta["id"], "nombre": cat.nombre(receta["producto"]), "intentos": intentos,
                        "comprar": lista, "fabricar": fabricar,
                        "de_inventario": [{"id": k, "nombre": cat.nombre(k), "cantidad": v} for k, v in inventario_usado.items()],
-                       "coste_total": total, "texto": "\n".join(lineas)})
+                       "coste_total": sum(i["coste"] or 0 for i in lista), "texto": "\n".join(lineas)})
 
     def _expandir_compra(self, receta, intentos, ctx, precios, npc, comprar, fabricar, inv_usado, visitados, prof):
         cat = self.cat
@@ -1136,8 +835,7 @@ class Servicios:
         visitados = visitados | {int(receta["producto"])}
         for d in a.get("desglose_ingredientes") or []:
             oid = int(d["id"])
-            origenes = d.get("origenes") or ({d["origen"]: d.get("unidades_necesarias", d.get("cantidad", 0))} if d.get("origen") else {})
-            for origen, unidades in origenes.items():
+            for origen, unidades in (d.get("origenes") or {}).items():
                 if not unidades or (isinstance(unidades, float) and not math.isfinite(unidades)):
                     continue
                 if origen == "inventario":
@@ -1146,14 +844,15 @@ class Servicios:
                     sub = cat.receta(d["receta_id"])
                     if sub is None:
                         continue
-                    a_sub = self._analizar(sub, ctx, precios, npc, 1, inventario=False)
+                    a_sub = self._analizar(sub, ctx, precios, npc, 1, inventario={})
                     por_intento = (a_sub.get("salidas_esperadas") or {}).get(oid) or a_sub.get("items_esperados") or 1
                     n_sub = math.ceil(unidades / por_intento - 1e-9)
                     fabricar.append({"receta_id": sub["id"], "nombre": cat.nombre(sub["producto"]), "unidades": unidades,
                                      "intentos": n_sub, "profesion": sub["profesion"]})
                     self._expandir_compra(sub, n_sub, ctx, precios, npc, comprar, fabricar, inv_usado, visitados, prof + 1)
                 else:
-                    precio = campo(precios.get(oid), "precio_min") if origen == "mercado" else npc.get(oid, cat.objeto(oid).get("precio_npc"))
+                    precio = (campo(precios.get(oid), "precio_min") if origen == "mercado"
+                              else npc.get(oid, (cat.objeto(oid) or {}).get("precio_npc")))
                     item = comprar.setdefault((oid, origen), {"id": oid, "nombre": cat.nombre(oid), "origen": origen,
                                                               "cantidad": 0.0, "coste_unit": d.get("coste_unit"),
                                                               "precio_ultimo": precio})
@@ -1186,13 +885,14 @@ class Servicios:
         with self._lock:
             # keep those awaiting review and the last 20 finished ones
             ordenadas = sorted(self.sesiones.values(), key=lambda s: s.get("creada") or "", reverse=True)
-            guardar = [s for s in ordenadas if s["estado"] in ("revision", "procesando")]
-            guardar += [s for s in ordenadas if s["estado"] not in ("revision", "procesando")][:20]
+            abiertas = [s for s in ordenadas if s["estado"] in ("revision", "procesando")]
+            cerradas = [s for s in ordenadas if s["estado"] not in ("revision", "procesando")]
             try:
                 ruta = Path(self.ruta_sesiones)
                 ruta.parent.mkdir(parents=True, exist_ok=True)
                 tmp = ruta.with_suffix(".tmp")
-                tmp.write_text(json.dumps(limpio(guardar), ensure_ascii=False, indent=1), encoding="utf-8")
+                tmp.write_text(json.dumps(limpio(abiertas + cerradas[:20]), ensure_ascii=False, indent=1),
+                               encoding="utf-8")
                 os.replace(tmp, ruta)
             except OSError as e:
                 log.warning("Could not save the capture sessions: %s", e)
@@ -1212,17 +912,24 @@ class Servicios:
         return sorted((self.resumen_sesion(s) for s in self.sesiones.values()),
                       key=lambda s: s.get("creada") or "", reverse=True)
 
-    def sesion(self, sesion_id) -> dict:
+    def _sesion(self, sesion_id) -> dict:
         s = self.sesiones.get(sesion_id)
         if s is None:
             raise LookupError("Esa sesión de lectura no existe.")
+        return s
+
+    def sesion(self, sesion_id) -> dict:
+        s = self._sesion(sesion_id)
         return limpio({**self.resumen_sesion(s), "filas": s["filas"], "ids_guardados": s.get("ids_guardados", [])})
+
+    def _validar_servidor(self, servidor_id, mensaje: str) -> None:
+        if not servidor_id or servidor_id not in {s["id"] for s in self.repo.listar_servidores()}:
+            raise ValueError(mensaje)
 
     def _nueva_sesion(self, origen, servidor_id, archivo=None, nombre_archivo=None) -> dict:
         if not servidor_id:
             raise ValueError("Elige un perfil con servidor: las lecturas se guardan en el mercado de ese servidor.")
-        if servidor_id not in {s["id"] for s in self.repo.listar_servidores()}:
-            raise ValueError("Ese servidor no existe.")
+        self._validar_servidor(servidor_id, "Ese servidor no existe.")
         s = {"id": str(uuid.uuid4()), "origen": origen, "fuente": FUENTE_POR_ORIGEN[origen], "servidor_id": servidor_id,
              "estado": "procesando", "progreso": 0.0, "creada": iso(ahora()), "archivo": str(archivo) if archivo else None,
              "nombre_archivo": nombre_archivo, "error": None, "mensaje": None, "filas": [], "ids_guardados": [],
@@ -1236,7 +943,7 @@ class Servicios:
         estado_g = None
         if g is not None:
             try:
-                estado_g = g.estado() if hasattr(g, "estado") else {"activa": True}
+                estado_g = g.estado()
             except Exception as e:  # noqa: BLE001
                 estado_g = {"activa": True, "error": str(e)}
         return limpio({"grabando": g is not None, "grabacion": estado_g, "servidor_id": self.grabacion_servidor,
@@ -1245,10 +952,8 @@ class Servicios:
     def iniciar_grabacion(self, servidor_id, fps: float = 3) -> dict:
         if self.grabacion is not None:
             raise ValueError("Ya hay una lectura en marcha: termínala primero.")
-        if not servidor_id or servidor_id not in {s["id"] for s in self.repo.listar_servidores()}:
-            raise ValueError("Elige un perfil con servidor antes de empezar la lectura.")
-        mod = self.modulo("grabacion")
-        g = llamar(mod.SesionGrabacion, fps=max(1.0, min(4.0, float(fps or 3))), cat=self.cat.cat)
+        self._validar_servidor(servidor_id, "Elige un perfil con servidor antes de empezar la lectura.")
+        g = grabacion.SesionGrabacion(fps=max(1.0, min(4.0, float(fps or 3))), cat=self.cat)
         g.iniciar()
         self.grabacion, self.grabacion_servidor = g, servidor_id
         return self.estado_captura()
@@ -1278,33 +983,27 @@ class Servicios:
             origen = "imagen"
         else:
             raise ValueError("Formato no admitido: sube un vídeo (mp4, mkv, mov…) o una imagen (png, jpg…).")
-        # check dependencies before starting the thread
-        self.modulo("video" if origen == "video" else "grabacion")
         s = self._nueva_sesion(origen, servidor_id, archivo=ruta, nombre_archivo=nombre)
+
+        def progreso(p):
+            s["progreso"] = round(float(p), 3)
 
         def trabajo():
             try:
                 if origen == "video":
-                    mod = self.modulo("video")
-
-                    def progreso(p):
-                        s["progreso"] = round(float(p), 3)
-
-                    filas = llamar(mod.procesar_video, str(ruta), self.cat.cat, progreso=progreso)
+                    filas = video.procesar_video(str(ruta), self.cat, progreso=progreso)
                 else:
                     from PIL import Image
 
-                    mod = self.modulo("grabacion")
                     with Image.open(ruta) as img:
                         img = img.convert("RGB")
-                        filas = llamar(mod.procesar_imagen, img, self.cat.cat)
-                        if hasattr(mod, "guardar_recorte"):
-                            for f in filas:
-                                if f.get("dudosa") and f.get("caja"):
-                                    try:
-                                        f["recorte"] = mod.guardar_recorte(img, f)
-                                    except Exception:  # noqa: BLE001
-                                        pass
+                        filas = grabacion.procesar_imagen(img, self.cat)
+                        for f in filas:
+                            if f.get("dudosa") and f.get("caja"):
+                                try:
+                                    f["recorte"] = grabacion.guardar_recorte(img, f)
+                                except Exception:  # noqa: BLE001
+                                    pass
                 self._registrar_filas(s, filas)
             except Exception as e:  # noqa: BLE001
                 log.exception("Error processing %s", nombre)
@@ -1343,16 +1042,17 @@ class Servicios:
         else:
             self.guardar_sesion(s["id"])
 
-    def corregir_fila(self, sesion_id, idx: int, datos: dict) -> dict:
-        s = self.sesiones.get(sesion_id)
-        if s is None:
-            raise LookupError("Esa sesión de lectura no existe.")
-        if s["estado"] != "revision":
-            raise ValueError("Esta sesión ya no está en revisión.")
+    def _fila(self, s: dict, idx) -> dict:
         try:
-            fila = s["filas"][int(idx)]
+            return s["filas"][int(idx)]
         except (IndexError, ValueError):
             raise LookupError("Esa fila no existe.") from None
+
+    def corregir_fila(self, sesion_id, idx: int, datos: dict) -> dict:
+        s = self._sesion(sesion_id)
+        if s["estado"] != "revision":
+            raise ValueError("Esta sesión ya no está en revisión.")
+        fila = self._fila(s, idx)
         accion = datos.get("accion", "confirmar")
         if accion == "descartar":
             fila["estado"] = "descartada"
@@ -1370,9 +1070,7 @@ class Servicios:
 
     def guardar_sesion(self, sesion_id, descartar_pendientes: bool = True) -> dict:
         """Saves the session's correct rows (pending ones are discarded)."""
-        s = self.sesiones.get(sesion_id)
-        if s is None:
-            raise LookupError("Esa sesión de lectura no existe.")
+        s = self._sesion(sesion_id)
         if s["estado"] not in ("revision", "procesando"):
             raise ValueError("Esta sesión ya está guardada o falló.")
         if not descartar_pendientes and any(f["estado"] == "pendiente" for f in s["filas"]):
@@ -1381,11 +1079,14 @@ class Servicios:
         for f in s["filas"]:
             if f["estado"] == "pendiente":
                 f["estado"] = "descartada"
-        lecturas = self._filas_a_lecturas(buenas, s["servidor_id"], s["fuente"])
+        lecturas = parser.a_lecturas(
+            [{"objeto_id": f["objeto_id"], "precio": f["precio"], "cantidad": f["cantidad"], "nombre": f.get("nombre"),
+              "dudosa": False, "confianza": 1.0} for f in buenas],
+            s["servidor_id"], s["fuente"], incluir_dudosas=True, clase_lectura=Lectura)
         ids, en_cola = [], False
         if lecturas:
             res = self.repo.guardar_lecturas(lecturas, s["id"])
-            ids, en_cola = list(campo(res, "ids", []) or []), bool(campo(res, "en_cola", False))
+            ids, en_cola = list(res.ids), bool(res.en_cola)
         s.update(ids_guardados=ids, en_cola=en_cola, estado="terminada",
                  mensaje=f"Guardados {len(lecturas)} objeto(s) ({len(buenas)} anuncios)."
                          + (" Sin conexión: quedan en la cola y se subirán al reconectar." if en_cola else ""))
@@ -1393,24 +1094,6 @@ class Servicios:
         self._persistir_sesiones()
         self._limpiar_archivo(s)
         return self.resumen_sesion(s)
-
-    def _filas_a_lecturas(self, filas, servidor_id, fuente):
-        clase = self.clase_lectura()
-        filas_mercado = [{"objeto_id": f["objeto_id"], "precio": f["precio"], "cantidad": f["cantidad"],
-                          "nombre": f.get("nombre"), "dudosa": False, "confianza": 1.0} for f in filas]
-        try:
-            parser = self.modulo("parser")
-            return llamar(parser.a_lecturas, filas_mercado, servidor_id, fuente, incluir_dudosas=True,
-                          clase_lectura=clase)
-        except NoDisponible:
-            pass
-        libros: dict[int, list] = {}
-        for f in filas_mercado:
-            libros.setdefault(int(f["objeto_id"]), []).append((float(f["precio"]), int(f["cantidad"])))
-        fecha = ahora()
-        return [clase(servidor_id=servidor_id, objeto_id=oid, fecha=fecha, precio_min=min(o)[0],
-                      cantidad_total=sum(c for _, c in o), num_anuncios=len(o), ofertas=sorted(o), fuente=fuente)
-                for oid, o in libros.items()]
 
     @staticmethod
     def _borrar_tmp(ruta) -> None:
@@ -1424,43 +1107,35 @@ class Servicios:
     def _limpiar_archivo(self, s: dict, verificado: bool = False) -> None:
         """After reviewing/saving a session: deletes the reviewed crops and the source
         video/image, the latter only once its readings are verified in the database."""
-        archivo = s.get("archivo")
         recortes = [f["recorte"] for f in s.get("filas") or [] if f.get("recorte")]
-        ids = s.get("ids_guardados") or []
-        try:
-            temporales = self.modulo("temporales")
-        except NoDisponible:
-            temporales = None
-
         # crops of doubtful rows: already reviewed (the session is closed)
         for ruta in recortes:
-            marcado = False
-            if temporales is not None and hasattr(temporales, "marcar_revisado"):
-                try:
-                    marcado = bool(temporales.marcar_revisado(ruta))
-                except Exception as e:  # noqa: BLE001
-                    log.warning("marcar_revisado failed: %s", e)
+            try:
+                marcado = bool(temporales.marcar_revisado(ruta))
+            except Exception as e:  # noqa: BLE001
+                log.warning("marcar_revisado failed: %s", e)
+                marcado = False
             if not marcado:
                 self._borrar_tmp(ruta)
-        if recortes and temporales is not None and hasattr(temporales, "limpiar_revisados"):
+        if recortes:
             try:
                 temporales.limpiar_revisados()
             except Exception as e:  # noqa: BLE001
                 log.warning("limpiar_revisados failed: %s", e)
 
+        archivo, ids = s.get("archivo"), s.get("ids_guardados") or []
         if not archivo:
             return
         if verificado or not ids:
             # no data came out of this file (nothing to verify): it can be deleted now
             self._borrar_tmp(archivo)
             return
-        if temporales is not None:
-            try:
-                llamar(temporales.registrar_temporal, archivo, ids)
-                llamar(temporales.limpiar_verificados, self.repo)
-                return
-            except Exception as e:  # noqa: BLE001
-                log.warning("temporales failed (%s); verifying and deleting directly", e)
+        try:
+            temporales.registrar_temporal(archivo, ids)
+            temporales.limpiar_verificados(self.repo)
+            return
+        except Exception as e:  # noqa: BLE001
+            log.warning("temporales failed (%s); verifying and deleting directly", e)
         try:
             ok = self.repo.verificar_lecturas(ids) is True
         except Exception:  # noqa: BLE001
@@ -1469,57 +1144,45 @@ class Servicios:
             self._borrar_tmp(archivo)
 
     def ruta_recorte(self, sesion_id, idx) -> Path:
-        s = self.sesiones.get(sesion_id)
-        if s is None:
-            raise LookupError("Esa sesión de lectura no existe.")
-        try:
-            ruta = s["filas"][int(idx)].get("recorte")
-        except (IndexError, ValueError):
-            raise LookupError("Esa fila no existe.") from None
+        ruta = self._fila(self._sesion(sesion_id), idx).get("recorte")
         if not ruta or not Path(ruta).exists() or not Path(ruta).resolve().is_relative_to(DIR_TMP.resolve()):
             raise LookupError("No hay imagen de esa fila.")
         return Path(ruta)
 
     # --- calibration ------------------------------------------------------------
     def calibracion(self) -> dict:
-        cal = self.modulo("calibracion")
-        datos = cal.cargar()
-        salida = {"datos": datos, "resolucion": None, "actual": None}
+        salida = {"datos": calibracion.cargar(), "resolucion": None, "actual": None}
         try:
-            ancho, alto = cal.resolucion_pantalla()
+            ancho, alto = calibracion.resolucion_pantalla()
             salida["resolucion"] = [ancho, alto]
-            salida["actual"] = cal.configuracion_para(ancho, alto)
+            salida["actual"] = calibracion.configuracion_para(ancho, alto)
         except Exception as e:  # noqa: BLE001
             salida["aviso"] = f"No se pudo leer la resolución de la pantalla: {e}"
         return limpio(salida)
 
     def guardar_calibracion(self, datos: dict) -> dict:
-        cal = self.modulo("calibracion")
         ancho = _num(datos.get("ancho"), int, "ancho", 1, False)
         alto = _num(datos.get("alto"), int, "alto", 1, False)
         region = datos.get("region")
         if not region or len(region) != 4:
             raise ValueError("Marca la zona de la lista del mercado (x, y, ancho, alto).")
-        entrada = cal.guardar_region(ancho, alto, region, columnas=datos.get("columnas") or None,
-                                     escala=datos.get("escala"))
+        entrada = calibracion.guardar_region(ancho, alto, region, columnas=datos.get("columnas") or None,
+                                             escala=datos.get("escala"))
         return limpio({"guardada": entrada, **self.calibracion()})
 
     def borrar_calibracion(self, ancho, alto) -> dict:
-        cal = self.modulo("calibracion")
-        cal.borrar_region(int(ancho), int(alto))
+        calibracion.borrar_region(int(ancho), int(alto))
         return self.calibracion()
 
     def captura_pantalla(self, espera: float = 0, max_ancho: int = 1600) -> tuple[bytes, int, int]:
         """Passive capture (mss) of the calibrated monitor to mark the region. Returns (jpeg, width, height)."""
-        import io
-
         import mss
         from PIL import Image
 
         if espera:
             time.sleep(max(0.0, min(10.0, float(espera))))
         try:
-            indice = self.modulo("calibracion").monitor()
+            indice = calibracion.monitor()
         except Exception:  # noqa: BLE001
             indice = 1
         with mss.mss() as sct:
