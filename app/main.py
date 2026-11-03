@@ -1,8 +1,8 @@
-"""API REST + panel web (FastAPI). Arranque: `uvicorn app.main:app --port 8000` o iniciar.bat.
+"""REST API + web panel (FastAPI). Start with `uvicorn app.main:app --port 8000` or iniciar.bat.
 
-Prefijo /api; el frontend vive en app/static/. La lógica está en app/servicios.py.
-Seguridad: la app solo lee la pantalla (capturas pasivas); nunca envía clics ni teclas al juego.
-La clave de Supabase se queda en el backend (.env) y nunca se envía al navegador.
+Routes live under /api; the frontend lives in app/static/. The logic is in app/servicios.py.
+Safety: the app only reads the screen (passive captures); it never sends clicks or keys to the game.
+The Supabase key stays in the backend (.env) and is never sent to the browser.
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def crear_app(servicios: Servicios | None = None, arrancar: bool = True,
     @asynccontextmanager
     async def ciclo(app_: FastAPI):
         if arrancar:
-            # en segundo plano: subir la cola a Supabase puede tardar sin conexión
+            # in the background: uploading the queue to Supabase can take a while when offline
             threading.Thread(target=serv.arranque, name="arranque", daemon=True).start()
         yield
         if serv.grabacion is not None:
@@ -69,7 +69,7 @@ def crear_app(servicios: Servicios | None = None, arrancar: bool = True,
         log.exception("Error no controlado")
         return JSONResponse(status_code=500, content={"detail": f"Error interno: {type(e).__name__}: {e}"})
 
-    # --- estado -----------------------------------------------------------------
+    # --- status -----------------------------------------------------------------
     @app.get("/api/estado")
     def estado():
         return serv.estado()
@@ -78,7 +78,7 @@ def crear_app(servicios: Servicios | None = None, arrancar: bool = True,
     def subir_cola():
         return {"subidas": serv.repo.subir_pendientes(), **serv.estado()}
 
-    # --- servidores y perfiles ------------------------------------------------------
+    # --- servers and profiles ------------------------------------------------------
     @app.get("/api/servidores")
     def servidores():
         return serv.servidores()
@@ -129,7 +129,7 @@ def crear_app(servicios: Servicios | None = None, arrancar: bool = True,
             return {"filas": filas, "guardadas": len(buenas)}
         return {"filas": filas}
 
-    # --- ajustes y NPC ------------------------------------------------------------------
+    # --- settings and NPC prices ------------------------------------------------------------------
     @app.get("/api/ajustes")
     def ajustes():
         return serv.ajustes()
@@ -146,7 +146,7 @@ def crear_app(servicios: Servicios | None = None, arrancar: bool = True,
     def guardar_precio_npc(datos: dict = Body(...)):
         return serv.guardar_precio_npc(datos.get("objeto_id"), datos.get("precio"))
 
-    # --- catálogo ------------------------------------------------------------------------
+    # --- catalog ------------------------------------------------------------------------
     @app.get("/api/catalogo")
     def catalogo_info():
         c = serv.cat
@@ -158,10 +158,12 @@ def crear_app(servicios: Servicios | None = None, arrancar: bool = True,
 
     @app.get("/api/catalogo/iconos")
     def iconos():
-        """Categoría de icono de cada objeto y, si el usuario los bajó, sus iconos oficiales locales."""
+        """Icon category and Spanish/English name of every object, plus the official icons the user
+        downloaded (local only)."""
         objetos = serv.cat.objetos
-        return {"categorias": mapa_categorias(objetos), "oficiales": descarga_iconos.mapa(objetos),
-                "descarga": dict(descarga_iconos.estado)}
+        nombres = {str(oid): [o.get("nombre"), o.get("nombre_en")] for oid, o in (objetos or {}).items()}
+        return {"categorias": mapa_categorias(objetos), "nombres": nombres,
+                "oficiales": descarga_iconos.mapa(objetos), "descarga": dict(descarga_iconos.estado)}
 
     @app.post("/api/catalogo/iconos/descargar")
     def descargar_iconos():
@@ -183,7 +185,7 @@ def crear_app(servicios: Servicios | None = None, arrancar: bool = True,
         return {"id": objeto_id, **o, "nombre": c.nombre(objeto_id),
                 "recetas": [r["id"] for r in c.recetas_que_producen(objeto_id)]}
 
-    # --- recetas y oportunidades --------------------------------------------------------
+    # --- recipes and opportunities --------------------------------------------------------
     @app.get("/api/recetas")
     def recetas(perfil_id: str | None = None, q: str | None = None, profesion: str | None = None,
                 solo_desbloqueadas: bool = False, limite: int = Query(300, ge=1, le=1000)):
@@ -203,12 +205,12 @@ def crear_app(servicios: Servicios | None = None, arrancar: bool = True,
                       inversion_max: float | None = Query(None, ge=0), margen_min: float | None = None,
                       incluir_intermedios: bool = True, usar_inventario: bool = True,
                       limite: int = Query(50, ge=1, le=500)):
-        # margen_min llega en % desde el panel (10 = 10%)
+        # margen_min arrives as a percentage from the panel (10 = 10%)
         margen = margen_min / 100.0 if margen_min is not None else None
         return serv.oportunidades(perfil_id, profesion or None, inversion_max, margen, incluir_intermedios,
                                   usar_inventario, limite)
 
-    # --- mercado ----------------------------------------------------------------------------
+    # --- market ----------------------------------------------------------------------------
     @app.get("/api/mercado/ultimas")
     def ultimas(servidor_id: str, q: str | None = None, limite: int = Query(200, ge=1, le=5000)):
         return serv.ultimas_mercado(servidor_id, q, limite)
@@ -225,7 +227,7 @@ def crear_app(servicios: Servicios | None = None, arrancar: bool = True,
     def operacion(datos: dict = Body(...)):
         return serv.registrar_operacion(datos)
 
-    # --- captura ------------------------------------------------------------------------------
+    # --- capture ------------------------------------------------------------------------------
     @app.get("/api/captura/estado")
     def estado_captura():
         return serv.estado_captura()
@@ -240,7 +242,7 @@ def crear_app(servicios: Servicios | None = None, arrancar: bool = True,
 
     @app.post("/api/captura/subir")
     async def subir(request: Request, nombre: str, servidor_id: str):
-        """Cuerpo = bytes del archivo (vídeo o imagen). Se guarda en capturas/tmp y se procesa en segundo plano."""
+        """Body = raw file bytes (video or image). Saved to capturas/tmp and processed in the background."""
         nombre_seguro = Path(nombre).name or "archivo"
         DIR_TMP.mkdir(parents=True, exist_ok=True)
         ruta = DIR_TMP / f"{uuid.uuid4().hex[:12]}_{nombre_seguro}"

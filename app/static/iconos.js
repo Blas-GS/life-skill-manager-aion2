@@ -1,7 +1,7 @@
-/* Iconos propios de Life Skill Manager (SVG de trazo, 24×24). Son originales y se publican con el proyecto.
-   Los iconos oficiales del juego son de NCSOFT: no están en el repositorio; si el usuario los descarga
-   (Ajustes), se guardan en data/iconos/ y la API los sirve solo en local.
-   Formato: una categoría por línea, lista de trazados «d». */
+/* Life Skill Manager's own icons (stroke SVG, 24×24). They are original and ship with the project.
+   The official game icons belong to NCSOFT and are not in the repository; if the user downloads them
+   (Settings), they are stored in data/iconos/ and the API serves them locally only.
+   Format: one category per line, a list of "d" paths. */
 "use strict";
 
 const ICONOS_CATEGORIA = {
@@ -47,7 +47,7 @@ const ICONOS_UI = {
   descargar: ["M12 4v12M7 11l5 5 5-5", "M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"],
 };
 
-/* Icono de cada profesión (clave del catálogo → categoría de icono) */
+/* Icon of each profession (catalog key → icon category) */
 const ICONO_PROFESION = { herreria: "arma", armadura: "armadura", orfebreria: "joya", alquimia: "pocion", cocina: "comida" };
 
 function svgIcono(trazos, tam) {

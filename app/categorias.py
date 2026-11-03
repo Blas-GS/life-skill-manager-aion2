@@ -1,8 +1,8 @@
-"""Categoría visual de cada objeto del catálogo (para elegir su icono propio en la interfaz).
+"""Visual category of every catalog object (used to pick its own icon in the UI).
 
-El catálogo no trae categoría: se deduce del nombre del archivo de icono de metabot.gg
-(p. ej. `icon_wp_gs_…` = arma, `icon_acc_ring_…` = joya, `icon_gm_…_torso` = armadura)
-y de palabras del nombre en español. Las claves coinciden con ICONOS_CATEGORIA de
+The catalog has no category field: it is inferred from the metabot.gg icon file name
+(e.g. `icon_wp_gs_…` = weapon, `icon_acc_ring_…` = jewel, `icon_gm_…_torso` = armor)
+and from words in the Spanish name. The keys match ICONOS_CATEGORIA in
 app/static/iconos.js.
 """
 from __future__ import annotations
@@ -14,7 +14,8 @@ CATEGORIAS = ("mineral", "gema", "madera", "hierba", "carne", "escama", "esencia
               "herramienta", "pocion", "comida", "pergamino", "piedra", "refinamiento", "arma", "armadura",
               "joya", "otro")
 
-# (categoría, palabras) — se prueban en este orden; la primera que aparezca en el nombre gana.
+# (category, words) — tried in this order; the first one found in the name wins.
+# The words are Spanish because they are matched against the Spanish object name.
 _REGLAS: list[tuple[str, tuple[str, ...]]] = [
     ("pergamino", ("pergamino", "hoja de papel")),
     ("refinamiento", ("piedra de refinamiento",)),
@@ -39,7 +40,7 @@ def _normal(texto: str) -> str:
 
 
 def categoria(objeto: dict | None) -> str:
-    """Categoría de un objeto del catálogo (dict con al menos `nombre` e `icono`)."""
+    """Category of a catalog object (a dict with at least `nombre` and `icono`)."""
     if not objeto:
         return "otro"
     icono = (objeto.get("icono") or "").lower()
@@ -63,5 +64,5 @@ def categoria(objeto: dict | None) -> str:
 
 
 def mapa_categorias(objetos: dict) -> dict[str, str]:
-    """{id (str): categoría} para todos los objetos del catálogo."""
+    """{id (str): category} for every catalog object."""
     return {str(oid): categoria(o) for oid, o in (objetos or {}).items()}

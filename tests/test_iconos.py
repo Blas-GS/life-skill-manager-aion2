@@ -1,4 +1,4 @@
-"""Iconos oficiales opcionales (app/iconos.py) y sus rutas de la API, sin red: transporte simulado."""
+"""Optional official icons (app/iconos.py) and their API routes, offline: mocked transport."""
 from __future__ import annotations
 
 import httpx
@@ -11,7 +11,7 @@ from app.servicios import Servicios
 URL = "https://metabot.gg/web/aion2/items/"
 OBJETOS = {
     "1": {"nombre": "Mineral de orichalcum", "icono": URL + "icon_item_ore_01.webp"},
-    "2": {"nombre": "Lingote de orichalcum", "icono": URL + "icon_item_ore_01.webp"},  # mismo icono
+    "2": {"nombre": "Lingote de orichalcum", "nombre_en": "Orichalcum Ingot", "icono": URL + "icon_item_ore_01.webp"},  # same icon
     "3": {"nombre": "Espada", "icono": URL + "icon_wp_sw_02.webp"},
     "4": {"nombre": "Sin icono", "icono": None},
     "5": {"nombre": "Otro origen", "icono": "https://ejemplo.com/x.webp"},
@@ -47,7 +47,7 @@ def test_descarga_solo_lo_que_falta(tmp_path):
     assert d.estado["activa"] is False and d.estado["hechos"] == 2 and d.estado["errores"] == 1
     assert len(peticiones) == 2 and all(p.startswith(URL) for p in peticiones)
     assert d.mapa(OBJETOS) == {"1": "icon_item_ore_01.webp", "2": "icon_item_ore_01.webp"}
-    # segunda vez: solo intenta el que falló
+    # second run: only retries the one that failed
     peticiones.clear()
     assert d.iniciar(OBJETOS)["total"] == 1
     d.esperar()
@@ -62,6 +62,8 @@ def test_api_iconos(tmp_path):
     with TestClient(main.crear_app(serv, arrancar=False, iconos=d)) as c:
         r = c.get("/api/catalogo/iconos").json()
         assert r["categorias"]["1"] == "mineral" and r["categorias"]["3"] == "arma"
+        assert r["nombres"]["2"] == ["Lingote de orichalcum", "Orichalcum Ingot"]
+        assert r["nombres"]["1"] == ["Mineral de orichalcum", None]
         assert r["oficiales"] == {} and r["descarga"]["activa"] is False
         assert c.get("/api/iconos/icon_item_ore_01.webp").status_code == 404
         assert c.post("/api/catalogo/iconos/descargar").json()["total"] == 2

@@ -1,8 +1,8 @@
-"""Iconos oficiales del juego, opcionales y solo en local.
+"""Official game icons: optional and local only.
 
-Los iconos de AION 2 son de NCSOFT: no se publican con el proyecto. Si el usuario lo pide (Ajustes),
-se descargan de metabot.gg a data/iconos/ (carpeta ignorada por git), con pausa entre peticiones,
-y la API los sirve desde ahí. Sin ellos la interfaz usa los iconos propios por categoría.
+AION 2 icons belong to NCSOFT, so they are not published with the project. When the user asks for them
+(Settings), they are downloaded from metabot.gg to data/iconos/ (ignored by git), pausing between
+requests, and the API serves them from there. Without them the UI uses its own category icons.
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ _ORIGEN = "https://metabot.gg/"
 
 
 def nombre_archivo(url: str | None) -> str | None:
-    """Nombre local del icono (último tramo de la URL de metabot.gg), o None si no vale."""
+    """Local file name of the icon (last segment of the metabot.gg URL), or None if it is not valid."""
     if not url or not url.startswith(_ORIGEN):
         return None
     nombre = url.rsplit("/", 1)[-1].split("?")[0]
@@ -32,7 +32,7 @@ def nombre_archivo(url: str | None) -> str | None:
 
 
 def ruta_icono(nombre: str, carpeta: Path = DIR_ICONOS) -> Path | None:
-    """Ruta de un icono descargado; None si el nombre no es válido o no existe."""
+    """Path of a downloaded icon; None if the name is not valid or the file does not exist."""
     if not _NOMBRE_VALIDO.match(nombre or ""):
         return None
     ruta = carpeta / nombre
@@ -40,7 +40,7 @@ def ruta_icono(nombre: str, carpeta: Path = DIR_ICONOS) -> Path | None:
 
 
 class DescargaIconos:
-    """Descarga en segundo plano los iconos que falten. Una sola descarga a la vez."""
+    """Downloads the missing icons in the background. One download at a time."""
 
     def __init__(self, carpeta: Path = DIR_ICONOS, pausa: float = 1.0,
                  transport: httpx.BaseTransport | None = None):
@@ -57,7 +57,7 @@ class DescargaIconos:
         return {p.name for p in self.carpeta.iterdir() if _NOMBRE_VALIDO.match(p.name)}
 
     def mapa(self, objetos: dict) -> dict[str, str]:
-        """{id de objeto: nombre de archivo} de los iconos que ya están en local."""
+        """{object id: file name} for the icons already stored locally."""
         hay = self.presentes()
         salida = {}
         for oid, o in (objetos or {}).items():

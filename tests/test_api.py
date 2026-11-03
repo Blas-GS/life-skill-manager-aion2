@@ -1,5 +1,5 @@
-"""Pruebas de la API (app/main.py + app/servicios.py) con dobles: catálogo mini, repo en memoria,
-motor y precio objetivo falsos. Al final, pruebas de humo con los módulos reales si existen."""
+"""API tests (app/main.py + app/servicios.py) with test doubles: tiny catalog, in-memory repo,
+fake engine and fake target price. At the end, smoke tests with the real modules if they exist."""
 from __future__ import annotations
 
 import importlib
@@ -17,7 +17,7 @@ import app.servicios as servicios
 from app.servicios import Servicios, campo
 
 # ---------------------------------------------------------------------------
-# dobles
+# test doubles
 # ---------------------------------------------------------------------------
 CAT_MINI = {
     "fuente": "test", "version_cliente": "0.0.0", "generado": "2026-11-02T12:00:00Z",
@@ -147,7 +147,7 @@ class RepoMemoria:
 
 
 class MotorFalso:
-    """Motor simplificado: coste = suma de ingredientes al precio de mercado/NPC, venta al 88%."""
+    """Simplified engine: cost = sum of ingredients at market/NPC price, sale at 88%."""
 
     @staticmethod
     def _precio(oid, cat, precios, npc):
@@ -227,7 +227,7 @@ class PrecioObjetivoFalso:
 
 
 class GrabacionFalsa:
-    """Sustituye a app.captura.grabacion: devuelve filas preparadas."""
+    """Stands in for app.captura.grabacion: returns prepared rows."""
     FILAS = [
         {"objeto_id": 1, "nombre_leido": "Mineral de orichalcum", "precio": 100, "cantidad": 50, "confianza": 0.97, "dudosa": False},
         {"objeto_id": 1, "nombre_leido": "Mineral de orichalcum", "precio": 105, "cantidad": 20, "confianza": 0.95, "dudosa": False},
@@ -286,7 +286,7 @@ def precio(c, sid, oid, p, cant=None, ofertas_texto=None):
 
 
 # ---------------------------------------------------------------------------
-# pruebas con dobles
+# tests with doubles
 # ---------------------------------------------------------------------------
 def test_frontend_y_estado(entorno):
     r = entorno.c.get("/")
@@ -358,7 +358,7 @@ def test_oportunidades_y_recetas(entorno):
     precio(c, s["id"], 3, 2000)
     r = c.get("/api/oportunidades", params={"perfil_id": "blas"}).json()
     nombres = [f["nombre"] for f in r["filas"]]
-    assert nombres == ["Espada de orichalcum", "Lingote de orichalcum"]  # cocina asmodian excluida
+    assert nombres == ["Espada de orichalcum", "Lingote de orichalcum"]  # Asmodian cooking excluded
     top = r["filas"][0]
     assert top["profesion_nombre"] == "Herrería" and top["intentos_recomendados"] == 10
     assert top["semaforo"] == "verde" and top["inversion"] == pytest.approx(12000)
@@ -366,13 +366,13 @@ def test_oportunidades_y_recetas(entorno):
     assert esc["estado"] == "hundido" and esc["precio_objetivo"] == pytest.approx(2200)
     assert esc["beneficio_total"] > top["beneficio_total"]
 
-    # márgenes: espada ≈ 46,6 %, lingote ≈ 40,4 %
+    # margins: sword ≈ 46.6%, ingot ≈ 40.4%
     filtrado = c.get("/api/oportunidades", params={"perfil_id": "blas", "margen_min": 42}).json()
     assert [f["nombre"] for f in filtrado["filas"]] == ["Espada de orichalcum"]
 
     lista = c.get("/api/recetas", params={"perfil_id": "blas"}).json()
     assert lista["faccion"] == "elyos" and {f["id"] for f in lista["filas"]} == {101, 102}
-    assert c.get("/api/recetas", params={"q": "okra"}).json()["total"] == 0  # perfil por defecto: elyos
+    assert c.get("/api/recetas", params={"q": "okra"}).json()["total"] == 0  # default profile: elyos
 
     det = c.get("/api/recetas/102", params={"perfil_id": "blas", "intentos": 2}).json()
     assert det["receta"]["nombre"] == "Espada de orichalcum" and det["analisis"]["intentos"] == 2
@@ -396,7 +396,7 @@ def test_motor_ausente_degrada_con_503(entorno, monkeypatch, tmp_path):
         preparar_perfil(c)
         r = c.get("/api/oportunidades", params={"perfil_id": "blas"})
         assert r.status_code == 503 and "app/calculo.py" in r.json()["detail"]
-        # el resto sigue funcionando
+        # everything else keeps working
         assert c.get("/api/recetas").status_code == 200
         assert c.get("/").status_code == 200
         det = c.get("/api/recetas/101").json()
@@ -426,7 +426,7 @@ def test_ajustes_y_npc(entorno):
     c.put("/api/precios-npc", json={"objeto_id": 4, "precio": 70})
     npc = c.get("/api/precios-npc").json()
     assert npc[0]["precio"] == 70 and npc[0]["origen"] == "manual"
-    # el servidor con su propia comisión manda sobre la global
+    # a server's own fee overrides the global one
     s = c.post("/api/servidores", json={"nombre": "Zikel", "faccion": "asmodian", "comision_registro": 0.05}).json()
     assert entorno.serv.ajustes_efectivos(s)["comision_registro"] == 0.05
 
@@ -453,7 +453,7 @@ def test_captura_imagen_revision_y_limpieza(entorno):
     ses = r.json()
     assert ses["estado"] == "revision" and ses["n_dudosas"] == 1 and ses["n_ok"] == 2
     archivos = list((entorno.tmp / "tmp").glob("*mercado.png"))
-    assert len(archivos) == 1  # se conserva hasta guardar y verificar
+    assert len(archivos) == 1  # kept until saved and verified
 
     d = c.get(f"/api/captura/sesiones/{ses['id']}").json()
     assert d["filas"][2]["estado"] == "pendiente"
@@ -467,9 +467,9 @@ def test_captura_imagen_revision_y_limpieza(entorno):
     lect = {l.objeto_id: l for l in entorno.repo.lecturas}
     assert lect[1].precio_min == 100 and lect[1].cantidad_total == 70 and lect[1].num_anuncios == 2
     assert lect[1].fuente == "captura" and lect[2].precio_min == 900
-    assert not list((entorno.tmp / "tmp").glob("*mercado.png"))  # borrado tras verificar
+    assert not list((entorno.tmp / "tmp").glob("*mercado.png"))  # deleted after verification
     assert c.post(f"/api/captura/sesiones/{ses['id']}/guardar").status_code == 400
-    # las sesiones se conservan en disco
+    # sessions are kept on disk
     assert (entorno.tmp / "sesiones.json").exists()
 
 
@@ -503,7 +503,7 @@ def test_operaciones(entorno):
 
 
 # ---------------------------------------------------------------------------
-# humo con los módulos reales (si ya existen)
+# smoke tests with the real modules (if they exist)
 # ---------------------------------------------------------------------------
 def _hay(modulo):
     try:
@@ -547,7 +547,7 @@ def test_humo_repositorio_local_real(tmp_path):
     repo = RepositorioLocal(tmp_path / "aion2.db")
     serv = Servicios(catalogo=CAT_MINI, repo=repo, motor=MotorFalso, precio_objetivo=PrecioObjetivoFalso,
                      ruta_sesiones=tmp_path / "s.json")
-    serv._inyectados.discard("repo")  # usar la clase Lectura real de app.db
+    serv._inyectados.discard("repo")  # use the real Lectura class from app.db
     with TestClient(main.crear_app(serv, arrancar=False)) as c:
         s, p = preparar_perfil(c)
         c.put("/api/perfiles/blas/niveles", json={"herreria": 7})

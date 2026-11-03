@@ -1,4 +1,4 @@
-"""Categoría de icono de cada objeto (app/categorias.py) y su coherencia con app/static/iconos.js."""
+"""Icon category of each object (app/categorias.py) and its consistency with app/static/iconos.js."""
 from __future__ import annotations
 
 import re
