@@ -1,5 +1,7 @@
 # AION 2 · Artesanía rentable
 
+**Proyecto Open Source** (licencia MIT). Se aceptan PRs de corrección de errores y mejoras del código, sujetos a la aprobación del autor. Si quieres implementar una funcionalidad nueva o un cambio de comportamiento, **abre primero un issue** para comentarlo antes de programarlo. Ver [Contribuir](#contribuir).
+
 Herramienta local para saber **qué recetas de artesanía de AION 2 te conviene fabricar ahora**, comprando los ingredientes en el mercado de tu servidor y vendiendo el producto. Tiene en cuenta tus niveles de las 5 profesiones, tu inventario/almacén, la comisión de registro e impuesto de venta, la probabilidad de éxito y de combo, la profundidad del mercado y el histórico de precios.
 
 Pestañas: **Panel** (mejores oportunidades, lista de la compra), **Mercado** (precios, histórico, precio objetivo, entrada manual), **Captura** (lectura pasiva del mercado por OCR), **Recetas** (árbol de ingredientes, comprar o fabricar), **Personaje** (perfiles, servidores, niveles, inventario) y **Ajustes**.
@@ -74,6 +76,17 @@ Calibra una vez la zona de la lista (pestaña *Captura*) y revisa las filas dudo
 ## Atribución
 
 Datos de recetas, objetos y curvas de éxito: [MetaBot.GG — AION 2 Crafting](https://metabot.gg/es_ES/aion-2/crafting), según su [condición de atribución](https://metabot.gg/en/ai). Las condiciones de uso de metabot.gg ([Terms of Service](https://metabot.gg/en/legal/terms-of-service)) permiten el uso personal y no comercial.
+
+## Contribuir
+
+Este es un proyecto Open Source y las contribuciones son bienvenidas:
+
+- **Correcciones de errores y mejoras del código** (rendimiento, limpieza, pruebas, documentación, OCR): abre un PR directamente. Se revisa y se fusiona solo con la aprobación del autor.
+- **Funcionalidades nuevas o cambios de comportamiento** (nuevas pantallas, cambios en el cálculo de rentabilidad, nuevas fuentes de datos…): **abre primero un issue** para comentarlo con el autor antes de programarlo. Así nadie pierde tiempo en un PR que no encaje con el rumbo del proyecto.
+
+Normas y pasos en [CONTRIBUTING.md](CONTRIBUTING.md).
+
+*English: this is an open-source project. Bug-fix and code-improvement PRs are welcome and merged at the author's discretion. For new features or behaviour changes, please open an issue first to discuss them.*
 
 ## Licencia
 
