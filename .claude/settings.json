@@ -1,6 +1,0 @@
-{
-  "env": {
-    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "35"
-  },
-  "autoCompactEnabled": true
-}

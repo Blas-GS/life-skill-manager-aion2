@@ -1,6 +1,6 @@
 """Access to the recipe and item catalog (data/catalogo.json).
 
-Interface (docs/contratos.md, section 1):
+Interface:
     cat = cargar_catalogo()
     cat.objeto(id) -> dict | None
     cat.nombre(id) -> str
