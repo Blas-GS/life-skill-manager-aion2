@@ -5,6 +5,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 import app.main as main
+from app.catalogo import Catalogo
 from app.iconos import DescargaIconos, nombre_archivo, ruta_icono
 from app.servicios import Servicios
 
@@ -57,7 +58,7 @@ def test_descarga_solo_lo_que_falta(tmp_path):
 def test_api_iconos(tmp_path):
     cat = {"profesiones": {}, "objetos": OBJETOS, "curvas": {}, "recetas": []}
     d = DescargaIconos(carpeta=tmp_path / "iconos", pausa=0, transport=_transporte([]))
-    serv = Servicios(catalogo=cat, repo=None, motor=None, precio_objetivo=None, modulos_captura={},
+    serv = Servicios(catalogo=Catalogo(cat),
                      ruta_sesiones=tmp_path / "s.json")
     with TestClient(main.crear_app(serv, arrancar=False, iconos=d)) as c:
         r = c.get("/api/catalogo/iconos").json()

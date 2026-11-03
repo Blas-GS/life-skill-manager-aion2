@@ -239,12 +239,7 @@ function t(es, vars) {
 /* numbers formatted the Spanish way by the backend (2.600,5) → English (2,600.5) */
 const numEN = s => String(s).replace(/[.,]/g, c => (c === '.' ? ',' : '.'));
 const N = s => traducirNombre(s);
-const COMPONENTES_EN = {
-  'El catálogo de recetas': 'The recipe catalog', 'La base de datos': 'The database', 'El motor de cálculo': 'The calculation engine',
-  'El cálculo de precio objetivo': 'The target price calculation', 'El OCR': 'The OCR', 'El lector de filas del mercado': 'The market row reader',
-  'El modo grabación': 'Recording mode', 'La importación de vídeo': 'Video import', 'La calibración': 'Calibration',
-  'La limpieza de temporales': 'Temporary files cleanup',
-};
+const COMPONENTES_EN = { 'El catálogo de recetas': 'The recipe catalog', 'La base de datos': 'The database' };
 const PATRONES_API = [
   [/Receta bloqueada: requiere nivel (\d+) \(tienes (\d+)\)\./g, (m, a, b) => `Recipe locked: requires level ${a} (you have ${b}).`],
   [/Sin precio para (.+?) \(combo\): se valora como (.+?)\.(?=\s|$)/g, (m, a, b) => `No price for ${N(a)} (combo): valued as ${N(b)}.`],
@@ -267,10 +262,9 @@ const PATRONES_API = [
     (m, a, b, c) => `Sunk price: the current one (${numEN(a)}) is below normal (P25 ${numEN(b)}). Better list around the median (${numEN(c)}) and wait, or don't craft yet.`],
   [/Precio más agresivo: ([\d.,]+)\./g, (m, a) => `More aggressive price: ${numEN(a)}.`],
   [/Buen momento para comprar: ([\d.,]+) ≤ ([\d.,]+)\./g, (m, a, b) => `Good time to buy: ${numEN(a)} ≤ ${numEN(b)}.`],
-  [/(El catálogo de recetas|La base de datos|El motor de cálculo|El cálculo de precio objetivo|El OCR|El lector de filas del mercado|El modo grabación|La importación de vídeo|La calibración|La limpieza de temporales) no está disponible todavía \((.+?)\)\./g,
+  [/(El catálogo de recetas|La base de datos) no está disponible todavía \((.+?)\)\./g,
     (m, a, b) => `${COMPONENTES_EN[a]} is not available yet (${b.replace(' o ', ' or ')}).`],
   [/Genera el catálogo con (.+?)\./g, (m, a) => `Build the catalog with ${a}.`],
-  [/Componente no disponible: (.+?)\./g, (m, a) => `Component not available: ${a}.`],
   [/^Falta ([\w]+)\.$/g, (m, a) => `Missing ${a}.`],
   [/^([\w]+) no es un número válido: (.+)$/g, (m, a, b) => `${a} is not a valid number: ${b}`],
   [/^([\w]+) no puede ser menor que (.+?)\.$/g, (m, a, b) => `${a} can't be lower than ${b}.`],

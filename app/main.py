@@ -17,16 +17,13 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.categorias import mapa_categorias
+from app.db import ErrorBaseDatos
 from app.iconos import DescargaIconos, ruta_icono
 from app.servicios import DIR_TMP, NoDisponible, Servicios, limpio
 
 log = logging.getLogger("aion2.api")
 DIR_STATIC = Path(__file__).resolve().parent / "static"
 MAX_SUBIDA = 8 * 1024 ** 3  # 8 GB
-
-
-def _error_bd(e: Exception) -> bool:
-    return type(e).__name__ in ("ErrorBaseDatos", "ErrorRed")
 
 
 def crear_app(servicios: Servicios | None = None, arrancar: bool = True,
@@ -62,10 +59,12 @@ def crear_app(servicios: Servicios | None = None, arrancar: bool = True,
     async def _no_existe(_: Request, e: LookupError):
         return JSONResponse(status_code=404, content={"detail": str(e).strip("'\"")})
 
+    @app.exception_handler(ErrorBaseDatos)
+    async def _base_datos(_: Request, e: ErrorBaseDatos):
+        return JSONResponse(status_code=503, content={"detail": f"Base de datos: {e}"})
+
     @app.exception_handler(Exception)
     async def _otro(_: Request, e: Exception):
-        if _error_bd(e):
-            return JSONResponse(status_code=503, content={"detail": f"Base de datos: {e}"})
         log.exception("Unhandled error")
         return JSONResponse(status_code=500, content={"detail": f"Error interno: {type(e).__name__}: {e}"})
 
@@ -154,14 +153,14 @@ def crear_app(servicios: Servicios | None = None, arrancar: bool = True,
 
     @app.get("/api/catalogo/buscar")
     def buscar(q: str = "", limite: int = Query(10, ge=1, le=50)):
-        return serv.cat.buscar(q, limite)
+        return serv.buscar(q, limite)
 
     @app.get("/api/catalogo/iconos")
     def iconos():
         """Icon category and Spanish/English name of every object, plus the official icons the user
         downloaded (local only)."""
         objetos = serv.cat.objetos
-        nombres = {str(oid): [o.get("nombre"), o.get("nombre_en")] for oid, o in (objetos or {}).items()}
+        nombres = {str(oid): [o.get("nombre"), o.get("nombre_en")] for oid, o in objetos.items()}
         return {"categorias": mapa_categorias(objetos), "nombres": nombres,
                 "oficiales": descarga_iconos.mapa(objetos), "descarga": dict(descarga_iconos.estado)}
 
@@ -183,7 +182,7 @@ def crear_app(servicios: Servicios | None = None, arrancar: bool = True,
         if not o:
             raise HTTPException(404, "Ese objeto no está en el catálogo.")
         return {"id": objeto_id, **o, "nombre": c.nombre(objeto_id),
-                "recetas": [r["id"] for r in c.recetas_que_producen(objeto_id)]}
+                "recetas": [r["id"] for r in c.recetas_que_producen(objeto_id, con_combo=True)]}
 
     # --- recipes and opportunities ------------------------------------------------------
     @app.get("/api/recetas")

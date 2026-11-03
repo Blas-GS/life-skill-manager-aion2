@@ -122,7 +122,7 @@ def test_indice_usa_cat_buscar_si_existe():
         def __init__(self):
             self.llamadas = []
 
-        def buscar(self, texto, limite=10):
+        def buscar(self, texto, limite=10, faccion=None):
             self.llamadas.append(texto)
             return [(630541002, "Okra frita", 90.0), (630541001, "Okra", 95.0)]
 
