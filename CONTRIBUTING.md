@@ -1,35 +1,35 @@
-# Cómo contribuir
+# Contributing
 
-¡Gracias por querer mejorar el proyecto! Es Open Source (licencia [MIT](LICENSE)) y lo mantiene su autor, que revisa y aprueba cada cambio antes de fusionarlo.
+Thanks for wanting to improve the project! It is Open Source ([MIT](LICENSE) license) and maintained by its author, who reviews and approves every change before merging it.
 
-## Qué tipo de contribución
+## Kinds of contribution
 
-| Tipo | Cómo |
+| Kind | How |
 |---|---|
-| Corrección de errores (bugs) | Abre un PR directamente. Si el error no es obvio, describe cómo reproducirlo. |
-| Mejoras del código sin cambiar el comportamiento (rendimiento, limpieza, pruebas, documentación, precisión del OCR) | Abre un PR directamente. |
-| Funcionalidades nuevas o cambios de comportamiento (nuevas pantallas, cambios en el cálculo de rentabilidad o del precio objetivo, nuevas fuentes de datos, cambios en la base de datos) | **Abre primero un issue** y coméntalo con el autor. Empieza a programar cuando la idea esté acordada. |
+| Bug fixes | Open a PR directly. If the bug is not obvious, describe how to reproduce it. |
+| Code improvements that do not change behaviour (performance, cleanup, tests, documentation, OCR accuracy) | Open a PR directly. |
+| New features or behaviour changes (new screens, changes to the profitability or target-price calculation, new data sources, database changes) | **Open an issue first** and discuss it with the author. Start coding once the idea has been agreed. |
 
-Todos los PR se fusionan **solo con la aprobación del autor**, que puede pedir cambios o rechazar los que no encajen con el proyecto.
+Every PR is merged **only with the author's approval**; the author may ask for changes or decline PRs that do not fit the project.
 
-## Normas que no se negocian
+## Non-negotiable rules
 
-- **Nunca automatizar el juego.** Nada de clics o teclas simuladas, lectura o escritura de memoria, modificación del cliente, captura de tráfico de red ni nada que interactúe con el proceso o el anticheat. La app solo lee imágenes de la pantalla que el usuario genera navegando a mano. Esto protege las cuentas de los usuarios frente a baneos.
-- **Sin datos ni assets de terceros en el repositorio.** No subas iconos, imágenes ni datos del juego (son de NCSOFT) ni el catálogo o la caché de metabot.gg. Se generan en local con `tools/importar_metabot.py`.
-- **Sin secretos.** Nunca subas un `.env`, claves de Supabase ni datos personales (bases de datos, capturas, inventarios).
-- **Respeta las condiciones de metabot.gg.** Mantén la atribución y el ritmo pausado de descargas del importador.
+- **Never automate the game.** No simulated clicks or keystrokes, no reading or writing process memory, no client modification, no network traffic capture, nothing that interacts with the game process or its anti-cheat. The app only reads screen images that the user produces by browsing manually. This protects users' accounts from bans.
+- **No third-party data or assets in the repository.** Do not commit icons, images or game data (they belong to NCSOFT), nor the metabot.gg catalog or cache. They are generated locally with `tools/importar_metabot.py`.
+- **No secrets.** Never commit a `.env` file, Supabase keys or personal data (databases, screenshots, inventories).
+- **Respect metabot.gg's terms.** Keep the attribution and the importer's slow download pace.
 
-## Pasos
+## Steps
 
-1. Haz un fork y crea una rama con un nombre descriptivo (`arreglo-ocr-precios`, `mejora-cola-offline`…).
-2. Prepara el entorno: `iniciar.bat` crea `.venv` e instala las dependencias (Windows, Python 3.14).
-3. Haz tus cambios. La interfaz y los mensajes van en **español**, con los nombres oficiales del cliente en español.
-4. Pasa las pruebas y añade las que cubran tu cambio:
+1. Fork the repository and create a branch with a descriptive name (`fix-ocr-prices`, `improve-offline-queue`…).
+2. Set up the environment: `iniciar.bat` creates `.venv` and installs the dependencies (Windows, Python 3.14).
+3. Make your changes. Code comments, commit messages and PRs are written in **English**. Code identifiers are in Spanish; keep the existing naming. The interface uses the official Spanish client names, with an ES/EN language switch.
+4. Run the tests and add tests that cover your change:
    ```bash
    .\.venv\Scripts\python.exe -m pytest
    ```
-5. Abre el PR contra `main` explicando qué cambia y por qué, y enlaza el issue si lo hay.
+5. Open the PR against `main`, explaining what changes and why, and link the issue if there is one.
 
-## Dudas
+## Questions
 
-Abre un issue. Para cualquier cambio que no sea una corrección o una mejora pequeña, coméntalo antes en un issue.
+Open an issue. For anything other than a fix or a small improvement, discuss it in an issue first.

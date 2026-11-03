@@ -22,7 +22,7 @@ SOFTWARE.
 
 ---
 
-Esta licencia cubre solo el código de este repositorio. No cubre los datos del
-juego (nombres, recetas, curvas), que son propiedad de NCSOFT, ni la recopilación
-de metabot.gg, que cada usuario descarga por su cuenta con tools/importar_metabot.py
-según las condiciones de ese sitio.
+This license covers only the code in this repository. It does not cover game
+data (names, recipes, success curves), which belong to NCSOFT, nor the metabot.gg
+compilation, which each user downloads on their own with tools/importar_metabot.py
+under that site's terms.

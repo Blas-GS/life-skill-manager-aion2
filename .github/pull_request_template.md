@@ -1,18 +1,18 @@
-## Qué cambia y por qué
+## What changes and why
 
-<!-- Describe el cambio. Si es una funcionalidad nueva o cambia el comportamiento, enlaza el issue donde se acordó (p.ej. "Cierra #12"). -->
+<!-- Describe the change. If it is a new feature or changes behaviour, link the issue where it was agreed (e.g. "Closes #12"). -->
 
-## Tipo
+## Type
 
-- [ ] Corrección de un error
-- [ ] Mejora del código sin cambiar el comportamiento
-- [ ] Funcionalidad nueva o cambio de comportamiento (acordada antes en un issue: #___)
+- [ ] Bug fix
+- [ ] Code improvement without behaviour change
+- [ ] New feature or behaviour change (agreed beforehand in issue #___)
 
-## Comprobaciones
+## Checklist
 
-- [ ] `pytest` pasa
-- [ ] No automatiza ni interactúa con el juego (solo lectura de pantalla)
-- [ ] No incluye `.env`, claves, datos personales, assets de NCSOFT ni datos de metabot.gg
-- [ ] Textos de la interfaz en español
+- [ ] `pytest` passes
+- [ ] Does not automate or interact with the game (screen reading only)
+- [ ] Does not include `.env`, keys, personal data, NCSOFT assets or metabot.gg data
+- [ ] Code comments, commits and this description are in English
 
-El autor revisa y aprueba cada PR antes de fusionarlo. Gracias por contribuir.
+The author reviews and approves every PR before merging it. Thanks for contributing!
