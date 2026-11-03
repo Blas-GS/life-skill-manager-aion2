@@ -24,5 +24,7 @@ data/*
 *.xlsx
 aion2_crafting_calculator*.html
 
-# --- Local Claude Code settings ---
-.claude/settings.local.json
+# --- Local working files (Claude Code settings, worktrees, internal plans) ---
+.claude/
+docs/plan.md
+docs/contratos.md

@@ -1,6 +1,6 @@
 """Crafting profitability engine (AION 2).
 
-Public interface (see docs/contratos.md, section 3):
+Public interface:
     coste_adquisicion(objeto_id, cat, precios, ...) -> (coste, origen, receta_id | None)
     analizar_receta(receta, cat, precios, ajustes, nivel, inventario=None, intentos=1, ...) -> dict
     mejores_oportunidades(cat, precios, ajustes, niveles, faccion, inventario=None, filtros=None, ...) -> list[dict]
@@ -388,7 +388,7 @@ def _max_intentos(lista, ingreso, tope=1_000_000):
 
 def analizar_receta(receta, cat, precios, ajustes, nivel, inventario=None, intentos=1, *,
                     niveles=None, faccion=None, precios_npc=None, ahora=None, _ctx=None) -> dict:
-    """Expected profitability of `intentos` attempts of a recipe. See docs/contratos.md §3."""
+    """Expected profitability of `intentos` attempts of a recipe."""
     if _ctx is None:
         niveles = dict(niveles or {})
         niveles.setdefault(receta["profesion"], nivel)

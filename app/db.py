@@ -4,8 +4,6 @@ Usage:
     repo = obtener_repositorio()   # Supabase if .env has SUPABASE_URL and SUPABASE_KEY; otherwise SQLite
     repo.backend                   # "supabase" | "local"
 
-Full contract in docs/contratos.md (section 2).
-
 Offline queue (Supabase only): if guardar_lecturas cannot write to Supabase,
 the readings are saved to data/pendientes.jsonl (one line per batch) and
 subir_pendientes() retries them. The ids (uuid) are generated here, before

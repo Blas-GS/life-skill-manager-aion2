@@ -384,7 +384,7 @@ def construir_catalogo(datos_es: dict, datos_en: dict, info_objetos: dict[str, d
             "vinculado": "(vinculado)" in nombre.lower() or "(bound)" in (nombre_en or "").lower(),
             "precio_npc": info.get("precio_tienda"),
             "slug": slug,
-            # --- extra fields (see "Proposed changes" in docs/contratos.md) ---
+            # --- extra fields ---
             "faccion": "ambas" if len(facs) == 2 else (facs.pop() if facs else None),
             "precio_venta_npc": info.get("precio_venta"),
             "comercio": info.get("comercio"),
