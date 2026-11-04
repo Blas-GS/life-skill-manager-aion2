@@ -748,26 +748,12 @@ class Servicios:
                                                                     ctx["inventario"])
         return limpio(salida)
 
-    def _coste_fabricar(self, oid, ctx, precios, npc):
-        """Best unlocked recipe for crafting `oid`: (unit cost, recipe)."""
-        mejor = (None, None)
-        for r in self.cat.recetas_que_producen(oid, con_combo=True):
-            if ctx["faccion"] and r.get("faccion") not in (ctx["faccion"], "ambas", None):
-                continue
-            if self._nivel(ctx, r["profesion"]) < int(r.get("nivel") or 1):
-                continue
-            a = self._analizar(r, ctx, precios, npc, 1, inventario={})
-            salidas = a.get("salidas_esperadas") or {}
-            unidades = salidas.get(int(oid)) or (a.get("items_esperados") if int(r["producto"]) == int(oid) else 0)
-            if a.get("coste_intento") is None or not unidades:
-                continue
-            unit = a["coste_intento"] / unidades
-            if mejor[0] is None or unit < mejor[0]:
-                mejor = (unit, r)
-        return mejor
-
-    def _arbol(self, receta, ctx, precios, npc, visitados: set, profundidad: int) -> list[dict]:
+    def _arbol(self, receta, ctx, precios, npc, visitados: set, profundidad: int, motor=None) -> list[dict]:
+        """Ingredient tree. The "craft it" cost comes from the engine (same recipes and
+        unit cost as the profitability analysis): recipes that only yield the item as a
+        combo bonus are not a craft route for it."""
         cat = self.cat
+        motor = motor or calculo._Contexto(cat, precios, ctx["ajustes"], ctx["niveles"], ctx["faccion"], npc)
         nodos = []
         visitados = visitados | {int(receta["producto"])}
         for ing, q in receta.get("ingredientes") or []:
@@ -778,11 +764,12 @@ class Servicios:
                     "precio_npc": npc_p, "coste_fabricar": None, "receta_id": None, "hijos": [],
                     "en_inventario": ctx["inventario"].get(ing, 0),
                     "antiguedad_horas": horas_desde(campo(precios.get(ing), "fecha"))}
-            if ing not in visitados and profundidad < 5 and cat.recetas_que_producen(ing, con_combo=True):
-                coste, sub = self._coste_fabricar(ing, ctx, precios, npc)
+            if ing not in visitados and profundidad < 5 and cat.recetas_que_producen(ing):
+                coste, sub_id, _ = motor.coste_fabricar(ing)
+                sub = cat.receta(sub_id) if sub_id is not None else None
                 if sub is not None:
                     nodo.update(coste_fabricar=coste, receta_id=sub["id"],
-                                hijos=self._arbol(sub, ctx, precios, npc, visitados, profundidad + 1))
+                                hijos=self._arbol(sub, ctx, precios, npc, visitados, profundidad + 1, motor))
                 else:
                     nodo["nota"] = "Se puede fabricar, pero no tienes la receta desbloqueada o faltan precios."
             opciones = [(v, k) for k, v in (("mercado", mercado), ("npc", npc_p), ("fabricar", nodo["coste_fabricar"]))
