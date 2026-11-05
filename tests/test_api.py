@@ -327,3 +327,43 @@ def test_catalogo_real(tmp_path):
     res = serv.buscar("Mineral de orichalcum", 3)
     assert res and res[0]["nombre"]
     assert len(serv.cat.recetas) > 100
+
+
+CAT_COMBO = {
+    **CAT_MINI,
+    "objetos": {
+        "1": {"nombre": "Mineral de orichalcum", "nombre_en": "Orichalcum Ore", "vinculado": False, "precio_npc": None},
+        "7": {"nombre": "Espada de artesano", "nombre_en": "Artisan Sword", "vinculado": False, "precio_npc": None},
+        "8": {"nombre": "Espada brillante de artesano", "nombre_en": "Splendent Artisan Sword", "vinculado": False,
+              "precio_npc": None},
+        "9": {"nombre": "Anillo de artesano", "nombre_en": "Artisan Ring", "vinculado": False, "precio_npc": None},
+    },
+    "recetas": [
+        # the Splendent sword only comes out of this recipe as a combo bonus
+        {"id": 301, "faccion": "ambas", "profesion": "herreria", "nivel": 1, "producto": 7, "cantidad": 1,
+         "ingredientes": [[1, 2]], "curva": None, "combo_pct": 50, "curva_combo": None,
+         "producto_combo": 8, "cantidad_combo": 1},
+        {"id": 302, "faccion": "ambas", "profesion": "orfebreria", "nivel": 1, "producto": 9, "cantidad": 1,
+         "ingredientes": [[8, 1]], "curva": None, "combo_pct": 0, "curva_combo": None,
+         "producto_combo": None, "cantidad_combo": None},
+    ],
+}
+
+
+def test_combo_no_es_ruta_de_fabricacion(tmp_path):
+    """An item that a recipe only yields as a combo bonus is not "crafted": the recipe tree
+    must agree with the engine (no craft cost, no sub-recipe)."""
+    serv = Servicios(catalogo=Catalogo(CAT_COMBO), repo=RepositorioLocal(tmp_path / "aion2.db"),
+                     ruta_sesiones=tmp_path / "sesiones.json")
+    serv.segundo_plano = False
+    with TestClient(main.crear_app(serv, arrancar=False)) as c:
+        s, p = preparar_perfil(c)
+        precio(c, s["id"], 1, 100)
+        det = c.get("/api/recetas/302", params={"perfil_id": p["id"]}).json()
+        nodo = det["arbol"][0]
+        assert nodo["id"] == 8 and nodo["coste_fabricar"] is None and nodo["receta_id"] is None
+        assert nodo["hijos"] == [] and nodo["mejor"] is None
+        (ing,) = det["analisis"]["desglose_ingredientes"]
+        assert ing.get("receta_id") is None  # the engine does not craft it either
+        lc = c.get("/api/recetas/302/lista-compra", params={"perfil_id": p["id"], "intentos": 1}).json()
+        assert lc["fabricar"] == []
