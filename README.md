@@ -29,6 +29,8 @@ First steps:
    (`--simular` shows the report without saving.)
 3. **Dashboard** → recipes sorted by profit.
 
+**Project inside OneDrive?** Then `iniciar.bat` copies the code to `%LOCALAPPDATA%\LifeSkillManagerAion2` and runs the app from there, so the Python environment, the local database and the temporary screenshots stay on each computer instead of syncing to the cloud. Keep editing in the OneDrive folder; every launch refreshes the local copy. To run the tests from the OneDrive folder, use that copy's Python: `& "$env:LOCALAPPDATA\LifeSkillManagerAion2\.venv\Scripts\python.exe" -m pytest`.
+
 The recipe catalog (`data/catalogo.json`) **is not included in the repository**: `iniciar.bat` builds it the first time with `tools\importar_metabot.py`, which downloads it from metabot.gg at a slow pace (one request every 2 s, cached so nothing is fetched twice). It takes a few minutes.
 
 ## Database: your own Supabase (or local)

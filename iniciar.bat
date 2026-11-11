@@ -9,6 +9,22 @@ echo   Life Skill Manager - Aion 2
 echo ==============================================
 echo.
 
+rem --- folder synced by OneDrive? then run from a local copy on this PC (tools\copia_local.ps1) ---
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\copia_local.ps1" -Origen "%CD%"
+if errorlevel 2 goto :ejecutar_aqui
+if errorlevel 1 (
+    echo.
+    echo ERROR: no se pudo actualizar la copia local en "%LOCALAPPDATA%\LifeSkillManagerAion2".
+    pause
+    exit /b 1
+)
+echo Carpeta sincronizada con OneDrive: se ejecuta la copia local de este PC
+echo ^(%LOCALAPPDATA%\LifeSkillManagerAion2^). Python, los datos locales y las capturas se quedan ahi.
+echo.
+call "%LOCALAPPDATA%\LifeSkillManagerAion2\iniciar.bat"
+exit /b
+
+:ejecutar_aqui
 rem --- is it already running? ---
 netstat -ano | findstr /r /c:":8000 .*LISTENING" >nul
 if not errorlevel 1 (
