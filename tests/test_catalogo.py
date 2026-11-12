@@ -179,3 +179,14 @@ def test_precios_npc(cat):
     usados = {i for r in cat.recetas for i, _ in r["ingredientes"]}
     sin_precio = [cat.nombre(i) for i in usados if cat.objeto(i)["vinculado"] and not cat.objeto(i)["precio_npc"]]
     assert not sin_precio
+
+
+def test_materiales_compartidos_entre_profesiones(cat):
+    """Some refining materials (ingots, magic crystals, Balaur scales) can be made by two
+    professions with their own recipe ids. That is how the game works, not a data error:
+    the engine just picks the cheapest recipe the profile has unlocked."""
+    por = collections.defaultdict(set)
+    for r in cat.recetas:
+        por[(r["producto"], r["faccion"])].add(r["profesion"])
+    pares = {tuple(sorted(p)) for p in por.values() if len(p) > 1}
+    assert pares <= {("armadura", "herreria"), ("alquimia", "orfebreria")}

@@ -243,13 +243,6 @@ class _RepositorioBase:
             total[int(f["objeto_id"])] = total.get(int(f["objeto_id"]), 0) + int(f["cantidad"])
         return {k: v for k, v in total.items() if v > 0}
 
-    def _a_lecturas(self, filas: list[dict]) -> list[Lectura]:
-        ofertas = self._ofertas_de([str(f["id"]) for f in filas])
-        return [_lectura_de_fila(f, ofertas.get(str(f["id"]), [])) for f in filas]
-
-    def _por_objeto(self, filas: list[dict]) -> dict[int, Lectura]:
-        return {lec.objeto_id: lec for lec in self._a_lecturas(filas)}
-
     # --- defaults (overridden by Supabase) --------------------------------
     def subir_pendientes(self) -> int:
         return 0
@@ -341,28 +334,45 @@ class RepositorioLocal(_RepositorioBase):
     def __init__(self, ruta_db: str | Path | None = None):
         self.ruta = Path(ruta_db) if ruta_db else RUTA_DATOS / "aion2.db"
         self.ruta.parent.mkdir(parents=True, exist_ok=True)
-        con = sqlite3.connect(self.ruta, timeout=30)
-        try:
-            con.execute("pragma journal_mode = wal")
-            con.executescript(_ESQUEMA_SQLITE)
-        finally:
-            con.close()
+        # One connection per thread, reused across queries (opening one per query was
+        # the main cost of each API request).
+        self._hilo = threading.local()
+        self._abiertas: list[sqlite3.Connection] = []
+        self._candado_abiertas = threading.Lock()
+        con = self._conexion()
+        con.execute("pragma journal_mode = wal")
+        con.executescript(_ESQUEMA_SQLITE)
 
     def __repr__(self) -> str:
         return f"RepositorioLocal({str(self.ruta)!r})"
 
+    def _conexion(self) -> sqlite3.Connection:
+        con = getattr(self._hilo, "con", None)
+        if con is None:
+            # check_same_thread=False only so cerrar() can close it; each thread uses its own.
+            con = sqlite3.connect(self.ruta, timeout=30, check_same_thread=False)
+            con.row_factory = sqlite3.Row
+            con.execute("pragma foreign_keys = on")
+            self._hilo.con = con
+            with self._candado_abiertas:
+                self._abiertas.append(con)
+        return con
+
     @contextmanager
     def _con(self) -> Iterator[sqlite3.Connection]:
-        con = sqlite3.connect(self.ruta, timeout=30)
-        con.row_factory = sqlite3.Row
-        con.execute("pragma foreign_keys = on")
+        con = self._conexion()
         try:
             with con:  # commit on clean exit, rollback on exception
                 yield con
         except sqlite3.Error as e:
             raise ErrorBaseDatos(f"Error en la base de datos local: {e}") from e
-        finally:
+
+    def cerrar(self) -> None:
+        with self._candado_abiertas:
+            abiertas, self._abiertas = self._abiertas, []
+        for con in abiertas:
             con.close()
+        self._hilo = threading.local()
 
     def _filas(self, sql: str, params: Iterable = ()) -> list[dict]:
         with self._con() as con:
@@ -442,6 +452,10 @@ class RepositorioLocal(_RepositorioBase):
                 f"where lectura_id in ({', '.join('?' * len(trozo))})", trozo)
         return _agrupar_ofertas(filas)
 
+    def _a_lecturas(self, filas: list[dict]) -> list[Lectura]:
+        ofertas = self._ofertas_de([str(f["id"]) for f in filas])
+        return [_lectura_de_fila(f, ofertas.get(str(f["id"]), [])) for f in filas]
+
     def verificar_lecturas(self, ids: list[str]) -> bool:
         ids = [str(i) for i in ids]
         if not all(_es_uuid(i) for i in ids):
@@ -458,7 +472,8 @@ class RepositorioLocal(_RepositorioBase):
         return True
 
     def ultimas_lecturas(self, servidor_id: str) -> dict[int, Lectura]:
-        return self._por_objeto(self._filas("select * from ultima_lectura where servidor_id = ?", [servidor_id]))
+        return {lec.objeto_id: lec for lec in self._a_lecturas(
+            self._filas("select * from ultima_lectura where servidor_id = ?", [servidor_id]))}
 
     def historico(self, servidor_id: str, objeto_id: int, desde: datetime | None = None) -> list[Lectura]:
         sql = "select * from lecturas_mercado where servidor_id = ? and objeto_id = ?"
@@ -690,24 +705,24 @@ class RepositorioSupabase(_RepositorioBase):
             return False
         return True
 
-    def _ofertas_de(self, ids: list[str]) -> dict[str, list[tuple[float, int]]]:
-        filas: list[dict] = []
-        for trozo in _trozos(ids, self.TAM_IN):
-            filas += self._get("ofertas", [("select", "lectura_id,posicion,precio,cantidad"),
-                                           ("lectura_id", self._en(trozo)), ("order", "lectura_id,posicion")])
-        return _agrupar_ofertas(filas)
+    def _lecturas_con_ofertas(self, tabla: str, params: list[tuple[str, Any]]) -> list[Lectura]:
+        """Readings with their offers embedded: one request instead of one per 50 readings."""
+        filas = self._get(tabla, [("select", ",".join(_COLS_LECTURA) + ",ofertas(posicion,precio,cantidad)")]
+                          + params)
+        return [_lectura_de_fila(f, [(float(o["precio"]), int(o["cantidad"]))
+                                     for o in sorted(f.get("ofertas") or [], key=lambda o: int(o["posicion"]))])
+                for f in filas]
 
     def ultimas_lecturas(self, servidor_id: str) -> dict[int, Lectura]:
-        return self._por_objeto(self._get("ultima_lectura", [("select", ",".join(_COLS_LECTURA)),
-                                                             ("servidor_id", f"eq.{servidor_id}"),
-                                                             ("order", "objeto_id")]))
+        return {lec.objeto_id: lec for lec in self._lecturas_con_ofertas(
+            "ultima_lectura", [("servidor_id", f"eq.{servidor_id}"), ("order", "objeto_id")])}
 
     def historico(self, servidor_id: str, objeto_id: int, desde: datetime | None = None) -> list[Lectura]:
-        params = [("select", ",".join(_COLS_LECTURA)), ("servidor_id", f"eq.{servidor_id}"),
-                  ("objeto_id", f"eq.{int(objeto_id)}"), ("order", "fecha.asc,id.asc")]
+        params = [("servidor_id", f"eq.{servidor_id}"), ("objeto_id", f"eq.{int(objeto_id)}"),
+                  ("order", "fecha.asc,id.asc")]
         if desde is not None:
             params.append(("fecha", f"gte.{_iso(desde)}"))
-        return self._a_lecturas(self._get("lecturas_mercado", params))
+        return self._lecturas_con_ofertas("lecturas_mercado", params)
 
     # --- offline queue ---------------------------------------------------------
     def _leer_cola(self) -> list[dict]:
