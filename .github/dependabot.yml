@@ -1,0 +1,12 @@
+# Monthly update proposals for the Python dependencies, grouped into one pull request.
+# (Security fixes arrive separately and as soon as they are published.)
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      python:
+        patterns: ["*"]
+    open-pull-requests-limit: 2

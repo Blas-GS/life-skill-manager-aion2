@@ -96,8 +96,15 @@ class FalsoPostgrest:
                     col, _, dirc = clave.partition(".")
                     filas.sort(key=lambda f: (f.get(col) is None, f.get(col)), reverse=dirc == "desc")
             if "select" in p and p["select"] != "*":
-                cols = p["select"].split(",")
+                # embedded resource, e.g. "id,...,ofertas(posicion,precio,cantidad)"
+                sel, _, emb = p["select"].partition(",ofertas(")
+                cols = sel.split(",")
                 filas = [{c: f.get(c) for c in cols} for f in filas]
+                if emb:
+                    ecols = emb.rstrip(")").split(",")
+                    for f in filas:
+                        f["ofertas"] = [{c: o[c] for c in ecols} for o in self.tablas["ofertas"]
+                                        if o["lectura_id"] == f["id"]]
             ini = int(p.get("offset", 0))
             fin = ini + int(p["limit"]) if "limit" in p else None
             return httpx.Response(200, json=filas[ini:fin])
@@ -425,3 +432,24 @@ def test_paginacion(supa, falso, monkeypatch):
     res = supa.guardar_lecturas(lecs)
     assert len(supa.historico(SRV, 610620013, T0)) == 5
     assert supa.verificar_lecturas(res.ids) is True
+
+
+def test_supabase_trae_las_ofertas_en_una_peticion(supa, falso, monkeypatch):
+    monkeypatch.setattr(RepositorioSupabase, "TAM_IN", 2)
+    supa.guardar_lecturas([lectura(objeto_id=610620000 + i, precio=100 + i) for i in range(6)])
+    falso.peticiones.clear()
+    ult = supa.ultimas_lecturas(SRV)
+    assert len(ult) == 6 and ult[610620003].ofertas == [(103.0, 10), (108.0, 3)]
+    assert len(falso.peticiones) == 1  # offers embedded, not fetched in chunks
+
+
+def test_local_reutiliza_la_conexion(local):
+    import threading
+    assert local._conexion() is local._conexion()
+    otra = []
+    hilo = threading.Thread(target=lambda: otra.append((local._conexion(), local.listar_servidores())))
+    hilo.start()
+    hilo.join()
+    assert otra[0][0] is not local._conexion() and otra[0][1][0]["id"] == SRV  # one per thread
+    local.cerrar()
+    assert local.listar_servidores()[0]["id"] == SRV  # reopens after closing
