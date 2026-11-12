@@ -1,6 +1,6 @@
 # Exact versions tested with Python 3.14 on Windows. Dependabot proposes updates
 # (.github/dependabot.yml); update them together and run the tests.
-fastapi==0.162.0
+fastapi==0.162.2
 uvicorn[standard]==0.54.0
 httpx==0.28.1
 python-dotenv==1.2.4
